@@ -1,0 +1,1 @@
+ALTER TABLE `salons` ADD `zip_code` text;

@@ -1,0 +1,41 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1760106274017,
+      "tag": "0000_powerful_trish_tilby",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1760106917878,
+      "tag": "0001_naive_luminals",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1760109207385,
+      "tag": "0002_wandering_molten_man",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1761561075235,
+      "tag": "0003_magenta_captain_marvel",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1761564531823,
+      "tag": "0004_classy_rocket_racer",
+      "breakpoints": true
+    }
+  ]
+}
