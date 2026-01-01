@@ -1,13 +1,18 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import "./globals.css";
-import VisualEditsMessenger from "../visual-edits/VisualEditsMessenger";
 import ErrorReporter from "@/components/ErrorReporter";
-import Script from "next/script";
 import { Toaster } from "sonner";
 
 export const metadata: Metadata = {
   title: "SalonBook - Discover & Book Your Perfect Salon",
   description: "Reduce wait times by booking appointments at top-rated salons with real-time availability",
+};
+
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 5,
+  userScalable: true,
 };
 
 export default function RootLayout({
@@ -17,21 +22,11 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="en">
-      <body className="antialiased">
+
+      <body className="antialiased touch-manipulation">
         <ErrorReporter />
-        <Script
-          src="https://slelguoygbfzlpylpxfs.supabase.co/storage/v1/object/public/scripts//route-messenger.js"
-          strategy="afterInteractive"
-          data-target-origin="*"
-          data-message-type="ROUTE_CHANGE"
-          data-include-search-params="true"
-          data-only-in-iframe="true"
-          data-debug="true"
-          data-custom-data='{"appName": "YourApp", "version": "1.0.0", "greeting": "hi"}'
-        />
         {children}
         <Toaster position="top-center" richColors />
-        <VisualEditsMessenger />
       </body>
     </html>
   );

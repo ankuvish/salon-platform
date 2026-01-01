@@ -38,5 +38,6 @@ export async function apiRequest(
   return fetch(url, {
     ...options,
     headers,
+    credentials: 'include',
   });
 }

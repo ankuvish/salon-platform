@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent } from "@/components/ui/card";
-import { Phone, Mail, User, Store, MapPin, Upload, X, Plus, Clock, DollarSign, Users } from "lucide-react";
+import { Phone, Mail, User, Store, MapPin, Upload, X, Plus, Clock, DollarSign, Users, Lock } from "lucide-react";
 import { toast } from "sonner";
 
 interface Service {
@@ -29,6 +29,7 @@ export interface SalonOwnerFormData {
   salonName: string;
   phone: string;
   email: string;
+  password: string;
   salonType: string;
   services: Service[];
   address: string;
@@ -46,8 +47,10 @@ export const SalonOwnerRegistrationForm = ({ onSubmit, isLoading, initialPhone =
   // Basic Info
   const [ownerName, setOwnerName] = useState("");
   const [salonName, setSalonName] = useState("");
+  const [countryCode, setCountryCode] = useState("+91");
   const [phone, setPhone] = useState(initialPhone);
   const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
   const [salonType, setSalonType] = useState("");
   
   // Location
@@ -126,12 +129,17 @@ export const SalonOwnerRegistrationForm = ({ onSubmit, isLoading, initialPhone =
       toast.error("Please enter phone number");
       return false;
     }
-    if (!/^\+[1-9]\d{1,14}$/.test(phone)) {
-      toast.error("Please enter phone in international format (e.g., +919876543210)");
+    const fullPhone = `${countryCode}${phone}`;
+    if (!/^\+[1-9]\d{1,14}$/.test(fullPhone)) {
+      toast.error("Please enter a valid phone number");
       return false;
     }
     if (!email.trim() || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       toast.error("Please enter a valid email address");
+      return false;
+    }
+    if (!password.trim() || password.length < 6) {
+      toast.error("Password must be at least 6 characters");
       return false;
     }
     if (!salonType) {
@@ -174,8 +182,9 @@ export const SalonOwnerRegistrationForm = ({ onSubmit, isLoading, initialPhone =
     const formData: SalonOwnerFormData = {
       ownerName,
       salonName,
-      phone,
+      phone: `${countryCode}${phone}`,
       email,
+      password,
       salonType,
       services: services.filter(s => s.name.trim() && s.price && s.durationMinutes && s.staffName.trim()),
       address,
@@ -238,17 +247,36 @@ export const SalonOwnerRegistrationForm = ({ onSubmit, isLoading, initialPhone =
               <Label htmlFor="phone">
                 Mobile Number <span className="text-destructive">*</span>
               </Label>
-              <div className="relative">
-                <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  id="phone"
-                  type="tel"
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+919876543210"
-                  className="pl-10"
-                  disabled={isLoading}
-                />
+              <div className="flex gap-2">
+                <Select value={countryCode} onValueChange={setCountryCode} disabled={isLoading}>
+                  <SelectTrigger className="w-[120px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="+1">🇺🇸 +1</SelectItem>
+                    <SelectItem value="+44">🇬🇧 +44</SelectItem>
+                    <SelectItem value="+91">🇮🇳 +91</SelectItem>
+                    <SelectItem value="+86">🇨🇳 +86</SelectItem>
+                    <SelectItem value="+81">🇯🇵 +81</SelectItem>
+                    <SelectItem value="+49">🇩🇪 +49</SelectItem>
+                    <SelectItem value="+33">🇫🇷 +33</SelectItem>
+                    <SelectItem value="+61">🇦🇺 +61</SelectItem>
+                    <SelectItem value="+971">🇦🇪 +971</SelectItem>
+                    <SelectItem value="+966">🇸🇦 +966</SelectItem>
+                  </SelectContent>
+                </Select>
+                <div className="relative flex-1">
+                  <Phone className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    id="phone"
+                    type="tel"
+                    value={phone}
+                    onChange={(e) => setPhone(e.target.value.replace(/\D/g, ""))}
+                    placeholder="XXXXXXXXXX"
+                    className="pl-10"
+                    disabled={isLoading}
+                  />
+                </div>
               </div>
             </div>
 
@@ -264,6 +292,24 @@ export const SalonOwnerRegistrationForm = ({ onSubmit, isLoading, initialPhone =
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="salon@example.com"
+                  className="pl-10"
+                  disabled={isLoading}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="password">
+                Password <span className="text-destructive">*</span>
+              </Label>
+              <div className="relative">
+                <Lock className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                <Input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter password"
                   className="pl-10"
                   disabled={isLoading}
                 />

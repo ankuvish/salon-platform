@@ -1,52 +1,88 @@
 import { Router } from 'express';
-import { db } from '../db';
-import { salons, services, staff, reviews, user } from '../db/schema';
-import { eq, like, or, and, sql, gte } from 'drizzle-orm';
-import { validateSession } from '../lib/auth';
+import { Salon, User } from '../db/schema';
 
 const router = Router();
 
-// Get all salons with filters
+router.get('/regional-stats', async (req, res) => {
+  try {
+    const salons = await Salon.find({});
+    const moderators = await User.find({ role: 'moderator' });
+    
+    const regionMap = new Map();
+    
+    salons.forEach(salon => {
+      const region = salon.city?.toLowerCase() || 'unknown';
+      if (!regionMap.has(region)) {
+        regionMap.set(region, {
+          region: salon.city || 'Unknown',
+          approved: 0,
+          pending: 0,
+          rejected: 0,
+          rejectedSalons: [],
+          moderator: null
+        });
+      }
+      
+      const stats = regionMap.get(region);
+      if (salon.approvalStatus === 'approved') stats.approved++;
+      else if (salon.approvalStatus === 'pending') stats.pending++;
+      else if (salon.approvalStatus === 'rejected') {
+        stats.rejected++;
+        stats.rejectedSalons.push({
+          name: salon.name,
+          reason: salon.rejectionReason || 'No reason provided'
+        });
+      }
+    });
+    
+    moderators.forEach(mod => {
+      const modRegion = mod.region?.toLowerCase();
+      if (modRegion && regionMap.has(modRegion)) {
+        regionMap.get(modRegion).moderator = {
+          name: mod.name,
+          email: mod.email
+        };
+      }
+    });
+    
+    res.json(Array.from(regionMap.values()));
+  } catch (error) {
+    console.error('Error fetching regional stats:', error);
+    res.status(500).json({ error: 'Failed to fetch regional stats' });
+  }
+});
+
 router.get('/', async (req, res) => {
   try {
-    const { 
-      limit = '50', 
-      city, 
-      minRating, 
-      salonType,
-      search 
-    } = req.query;
-
-    let query = db.select().from(salons);
-    const conditions: any[] = [];
-
-    if (city && city !== 'all') {
-      conditions.push(eq(salons.city, city as string));
-    }
-
-    if (minRating) {
-      conditions.push(gte(salons.rating, parseFloat(minRating as string)));
-    }
-
-    if (salonType && salonType !== 'all') {
-      conditions.push(eq(salons.salonType, salonType as string));
-    }
-
+    const { limit = '50', city, minRating, salonType, search, status } = req.query;
+    
+    const query: any = {};
+    
+    if (city && city !== 'all') query.city = city;
+    if (minRating) query.rating = { $gte: parseFloat(minRating as string) };
+    if (salonType && salonType !== 'all') query.salonType = salonType;
     if (search) {
-      conditions.push(
-        or(
-          like(salons.name, `%${search}%`),
-          like(salons.description, `%${search}%`),
-          like(salons.city, `%${search}%`)
-        )
-      );
+      query.$or = [
+        { name: { $regex: search, $options: 'i' } },
+        { description: { $regex: search, $options: 'i' } },
+        { city: { $regex: search, $options: 'i' } }
+      ];
     }
 
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions)) as any;
+    // Only show approved salons to public, unless status filter is specified (for moderators/owners)
+    if (status) {
+      if (status === 'all') {
+        // Don't filter by status - show all
+      } else {
+        query.approvalStatus = status;
+      }
+    } else {
+      query.approvalStatus = 'approved';
     }
 
-    const result = await query.limit(parseInt(limit as string));
+    console.log('Fetching salons with query:', query);
+    const result = await Salon.find(query).limit(parseInt(limit as string));
+    console.log(`Found ${result.length} salons`);
     res.json(result);
   } catch (error) {
     console.error('Error fetching salons:', error);
@@ -54,26 +90,18 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Search salons
 router.get('/search', async (req, res) => {
   try {
     const { q } = req.query;
-    
-    if (!q) {
-      return res.json([]);
-    }
+    if (!q) return res.json([]);
 
-    const result = await db
-      .select()
-      .from(salons)
-      .where(
-        or(
-          like(salons.name, `%${q}%`),
-          like(salons.description, `%${q}%`),
-          like(salons.city, `%${q}%`)
-        )
-      )
-      .limit(10);
+    const result = await Salon.find({
+      $or: [
+        { name: { $regex: q, $options: 'i' } },
+        { description: { $regex: q, $options: 'i' } },
+        { city: { $regex: q, $options: 'i' } }
+      ]
+    }).limit(10);
 
     res.json(result);
   } catch (error) {
@@ -82,13 +110,9 @@ router.get('/search', async (req, res) => {
   }
 });
 
-// Get nearby salons (placeholder - would need geolocation logic)
 router.get('/nearby', async (req, res) => {
   try {
-    const { latitude, longitude, radius = '10' } = req.query;
-    
-    // Simple implementation - in production, use proper geospatial queries
-    const result = await db.select().from(salons).limit(20);
+    const result = await Salon.find().limit(20);
     res.json(result);
   } catch (error) {
     console.error('Error fetching nearby salons:', error);
@@ -96,67 +120,48 @@ router.get('/nearby', async (req, res) => {
   }
 });
 
-// Get single salon by ID
 router.get('/:id', async (req, res) => {
   try {
-    const { id } = req.params;
-    
-    const result = await db
-      .select()
-      .from(salons)
-      .where(eq(salons.id, parseInt(id)))
-      .limit(1);
-
-    if (result.length === 0) {
-      return res.status(404).json({ error: 'Salon not found' });
+    if (!req.params.id || req.params.id === 'undefined') {
+      return res.status(400).json({ error: 'Invalid salon ID' });
     }
-
-    res.json(result[0]);
+    const result = await Salon.findById(req.params.id);
+    if (!result) return res.status(404).json({ error: 'Salon not found' });
+    res.json(result);
   } catch (error) {
     console.error('Error fetching salon:', error);
     res.status(500).json({ error: 'Failed to fetch salon' });
   }
 });
 
-// Update salon (owner only)
+router.post('/', async (req, res) => {
+  try {
+    const salon = new Salon(req.body);
+    await salon.save();
+    res.status(201).json(salon);
+  } catch (error) {
+    console.error('Error creating salon:', error);
+    res.status(500).json({ error: 'Failed to create salon' });
+  }
+});
+
 router.put('/:id', async (req, res) => {
   try {
-    const currentUser = await validateSession(req);
-    if (!currentUser) {
-      return res.status(401).json({ error: 'Unauthorized' });
+    if (!req.params.id || req.params.id === 'undefined') {
+      return res.status(400).json({ error: 'Invalid salon ID' });
     }
-
-    const { id } = req.params;
-    const salonId = parseInt(id);
-
-    // Check if user owns this salon
-    const salon = await db
-      .select()
-      .from(salons)
-      .where(eq(salons.id, salonId))
-      .limit(1);
-
-    if (salon.length === 0) {
-      return res.status(404).json({ error: 'Salon not found' });
-    }
-
-    if (salon[0].ownerId !== currentUser.id) {
-      return res.status(403).json({ error: 'Not authorized to update this salon' });
-    }
-
-    const updates = req.body;
-    await db.update(salons).set(updates).where(eq(salons.id, salonId));
-
-    const updated = await db
-      .select()
-      .from(salons)
-      .where(eq(salons.id, salonId))
-      .limit(1);
-
-    res.json(updated[0]);
-  } catch (error) {
-    console.error('Error updating salon:', error);
-    res.status(500).json({ error: 'Failed to update salon' });
+    console.log('Updating salon:', req.params.id, 'with data:', req.body);
+    const result = await Salon.findByIdAndUpdate(
+      req.params.id, 
+      { $set: req.body }, 
+      { new: true, runValidators: false }
+    );
+    if (!result) return res.status(404).json({ error: 'Salon not found' });
+    console.log('Salon updated successfully');
+    res.json(result);
+  } catch (error: any) {
+    console.error('Error updating salon:', error.message, error.stack);
+    res.status(500).json({ error: 'Failed to update salon', details: error.message });
   }
 });
 

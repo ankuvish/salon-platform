@@ -216,15 +216,15 @@ export default function RecommendationsPage() {
   }
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen flex flex-col">
       <Navigation />
 
       <div className="container mx-auto px-4 py-8 flex-1">
         {/* Header */}
         <div className="mb-8">
           <div className="flex items-center gap-3 mb-3">
-            <Sparkles className="h-8 w-8 text-primary" />
-            <h1 className="text-4xl font-bold">AI Recommendations</h1>
+            <Sparkles className="h-8 w-8 text-purple-600" />
+            <h1 className="text-4xl font-bold luxury-gradient-text">AI Recommendations</h1>
           </div>
           <p className="text-lg text-muted-foreground">
             Personalized salon suggestions based on your preferences and booking history
@@ -233,11 +233,11 @@ export default function RecommendationsPage() {
 
         {/* Personalized Message */}
         {session?.user && (
-          <Card className="mb-8 border-primary/20 bg-primary/5">
+          <Card className="mb-8 luxury-card border-purple-300 dark:border-purple-700 bg-gradient-to-br from-purple-50 to-pink-50 dark:from-purple-950/50 dark:to-pink-950/50">
             <CardContent className="pt-6">
               <div className="flex items-start gap-4">
-                <div className="p-3 rounded-full bg-primary/10">
-                  <Sparkles className="h-6 w-6 text-primary" />
+                <div className="p-3 rounded-full bg-gradient-to-br from-purple-500 to-pink-500">
+                  <Sparkles className="h-6 w-6 text-white" />
                 </div>
                 <div className="flex-1">
                   <h3 className="font-semibold mb-1">
@@ -264,7 +264,7 @@ export default function RecommendationsPage() {
 
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {promotions.map((promo) => (
-                <Card key={promo.id} className="border-green-500/20 bg-green-500/5">
+                <Card key={promo.id} className="luxury-card border-green-400 dark:border-green-600 bg-gradient-to-br from-green-50 to-emerald-50 dark:from-green-950/50 dark:to-emerald-950/50">
                   <CardHeader>
                     <div className="flex items-start justify-between gap-4">
                       <CardTitle className="text-lg">{promo.title}</CardTitle>
@@ -283,7 +283,7 @@ export default function RecommendationsPage() {
                         Valid until {new Date(promo.validUntil).toLocaleDateString()}
                       </span>
                     </div>
-                    <Button className="w-full" asChild>
+                    <Button className="w-full luxury-button" asChild>
                       <Link href={`/salons/${promo.salonId}`}>
                         View Salon
                       </Link>
@@ -320,7 +320,7 @@ export default function RecommendationsPage() {
           ) : (
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {recommendations.map((rec) => (
-                <Card key={rec.salon.id} className="overflow-hidden group hover:shadow-lg transition-shadow">
+                <Card key={rec.salon.id} className="overflow-hidden group hover:shadow-2xl transition-all duration-300 luxury-card hover:scale-105">
                   <div className="relative h-48 bg-muted">
                     {rec.salon.imageUrl ? (
                       <Image
@@ -369,7 +369,7 @@ export default function RecommendationsPage() {
                     </div>
 
                     <div className="flex gap-2">
-                      <Button className="flex-1" asChild>
+                      <Button className="flex-1 luxury-button" asChild>
                         <Link href={`/salons/${rec.salon.id}`}>
                           View Details
                         </Link>
@@ -434,9 +434,9 @@ export default function RecommendationsPage() {
         )}
 
         {/* CTA Section */}
-        <Card className="mt-12 bg-gradient-to-br from-primary/10 to-primary/5 border-primary/20">
+        <Card className="mt-12 luxury-card bg-gradient-to-br from-purple-100 via-pink-100 to-amber-100 dark:from-purple-950/50 dark:via-pink-950/50 dark:to-amber-950/50 border-purple-300 dark:border-purple-700">
           <CardContent className="pt-8 pb-8 text-center">
-            <Sparkles className="h-12 w-12 text-primary mx-auto mb-4" />
+            <Sparkles className="h-12 w-12 text-purple-600 dark:text-purple-400 mx-auto mb-4" />
             <h3 className="text-2xl font-bold mb-2">
               Get More Personalized Recommendations
             </h3>
@@ -446,7 +446,7 @@ export default function RecommendationsPage() {
                 : "Sign in to receive AI-powered recommendations tailored just for you"
               }
             </p>
-            <Button size="lg" asChild>
+            <Button size="lg" className="luxury-button" asChild>
               <Link href={session?.user ? "/" : "/sign-in?redirect=/recommendations"}>
                 {session?.user ? "Explore More Salons" : "Sign In to Continue"}
               </Link>

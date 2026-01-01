@@ -56,15 +56,27 @@ import Image from "next/image";
 interface Salon {
   id: number;
   name: string;
+  description?: string;
+  address?: string;
+  city?: string;
+  phone?: string;
+  openingTime?: string;
+  closingTime?: string;
   rating: number;
   imageUrl?: string | null;
+  isVerified?: boolean;
+  gstNumber?: string;
+  salonType?: string;
+  approvalStatus?: string;
+  rejectionReason?: string;
+  createdAt?: string;
 }
 
 interface Booking {
   id: number;
-  customerId: number;
-  serviceId: number;
-  staffId: number;
+  customerId: any;
+  serviceId: any;
+  staffId: any;
   bookingDate: string;
   startTime: string;
   endTime: string;
@@ -94,6 +106,7 @@ export default function DashboardPage() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [services, setServices] = useState<Service[]>([]);
   const [staff, setStaff] = useState<Staff[]>([]);
+  const [reviews, setReviews] = useState<any[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   // Service dialog state
@@ -124,7 +137,51 @@ export default function DashboardPage() {
   // Banner upload state
   const [isBannerDialogOpen, setIsBannerDialogOpen] = useState(false);
   const [bannerUrl, setBannerUrl] = useState("");
+  const [bannerPreview, setBannerPreview] = useState("");
   const [isUploadingBanner, setIsUploadingBanner] = useState(false);
+
+  const compressBannerImage = (file: File): Promise<string> => {
+    return new Promise((resolve) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const img = new Image();
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          let width = img.width;
+          let height = img.height;
+          const maxSize = 1200;
+          
+          if (width > height && width > maxSize) {
+            height = (height * maxSize) / width;
+            width = maxSize;
+          } else if (height > maxSize) {
+            width = (width * maxSize) / height;
+            height = maxSize;
+          }
+          
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d')!;
+          ctx.drawImage(img, 0, 0, width, height);
+          resolve(canvas.toDataURL('image/jpeg', 0.8));
+        };
+        img.src = e.target?.result as string;
+      };
+      reader.readAsDataURL(file);
+    });
+  };
+
+  // Edit salon details state
+  const [isEditingSalon, setIsEditingSalon] = useState(false);
+  const [salonForm, setSalonForm] = useState({
+    name: "",
+    description: "",
+    address: "",
+    city: "",
+    phone: "",
+    openingTime: "",
+    closingTime: ""
+  });
 
   useEffect(() => {
     // Always wait for session to finish loading
@@ -159,42 +216,62 @@ export default function DashboardPage() {
     try {
       setIsLoading(true);
       
-      const salonsRes = await apiRequest(`/api/salons?limit=100`);
+      const salonsRes = await apiRequest(`/api/salons?limit=100&status=all`);
       const salonsData = await salonsRes.json();
       
-      const userSalon = salonsData.find((s: any) => s.ownerId === session.user.id);
+      const userSalon = salonsData.find((s: any) => 
+        s.ownerId?.toString() === session.user.id?.toString()
+      );
       
       if (!userSalon) {
         toast.error("No salon found. Please contact support.");
         return;
       }
 
-      setSalon(userSalon);
+      const salonWithId = { ...userSalon, id: userSalon._id || userSalon.id };
+      setSalon(salonWithId);
       setBannerUrl(userSalon.imageUrl || "");
+      setBannerPreview(userSalon.imageUrl || "");
       setVerificationForm({
         gstNumber: userSalon.gstNumber || "",
         salonType: userSalon.salonType || "unisex"
       });
+      setSalonForm({
+        name: userSalon.name || "",
+        description: userSalon.description || "",
+        address: userSalon.address || "",
+        city: userSalon.city || "",
+        phone: userSalon.phone || "",
+        openingTime: userSalon.openingTime || "",
+        closingTime: userSalon.closingTime || ""
+      });
 
-      const [bookingsRes, servicesRes, staffRes] = await Promise.all([
-        apiRequest(`/api/bookings?salon_id=${userSalon.id}&limit=100`),
-        apiRequest(`/api/services?salon_id=${userSalon.id}&limit=100`),
-        apiRequest(`/api/staff?salon_id=${userSalon.id}&limit=100`)
+      const salonId = userSalon._id || userSalon.id;
+      const [bookingsRes, servicesRes, staffRes, reviewsRes] = await Promise.all([
+        apiRequest(`/api/bookings?salon_id=${salonId}&limit=100`),
+        apiRequest(`/api/services?salon_id=${salonId}&limit=100`),
+        apiRequest(`/api/staff?salon_id=${salonId}&limit=100`),
+        apiRequest(`/api/reviews?salonId=${salonId}`)
       ]);
 
       if (bookingsRes.ok) {
         const bookingsData = await bookingsRes.json();
-        setBookings(bookingsData);
+        setBookings(bookingsData.map((b: any) => ({ ...b, id: b._id || b.id })));
       }
 
       if (servicesRes.ok) {
         const servicesData = await servicesRes.json();
-        setServices(servicesData);
+        setServices(servicesData.map((s: any) => ({ ...s, id: s._id || s.id })));
       }
 
       if (staffRes.ok) {
         const staffData = await staffRes.json();
-        setStaff(staffData);
+        setStaff(staffData.map((s: any) => ({ ...s, id: s._id || s.id })));
+      }
+
+      if (reviewsRes.ok) {
+        const reviewsData = await reviewsRes.json();
+        setReviews(reviewsData);
       }
     } catch (error) {
       console.error("Failed to fetch dashboard data:", error);
@@ -358,18 +435,43 @@ export default function DashboardPage() {
     }
   };
 
+  // Salon edit functions
+  const handleSalonSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!salon) return;
+
+    try {
+      const response = await apiRequest(`/api/salons/${salon.id}`, {
+        method: "PUT",
+        body: JSON.stringify(salonForm)
+      });
+
+      if (response.ok) {
+        toast.success("Salon details updated");
+        setIsEditingSalon(false);
+        fetchDashboardData();
+      } else {
+        toast.error("Failed to update salon details");
+      }
+    } catch (error) {
+      toast.error("Failed to update salon details");
+    }
+  };
+
   // Banner upload functions
   const handleBannerSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!salon || !bannerUrl.trim()) return;
+    if (!salon || !bannerUrl.trim()) {
+      toast.error("Please upload an image");
+      return;
+    }
 
     try {
       setIsUploadingBanner(true);
+      
       const response = await apiRequest(`/api/salons/${salon.id}`, {
         method: "PUT",
-        body: JSON.stringify({
-          imageUrl: bannerUrl.trim()
-        })
+        body: JSON.stringify({ imageUrl: bannerUrl })
       });
 
       if (response.ok) {
@@ -377,10 +479,11 @@ export default function DashboardPage() {
         setIsBannerDialogOpen(false);
         fetchDashboardData();
       } else {
-        toast.error("Failed to update banner");
+        const errorData = await response.json();
+        toast.error(errorData.details || "Failed to update banner");
       }
-    } catch (error) {
-      toast.error("Failed to update banner");
+    } catch (error: any) {
+      toast.error(error.message || "Failed to update banner");
     } finally {
       setIsUploadingBanner(false);
     }
@@ -450,31 +553,146 @@ export default function DashboardPage() {
     );
   }
 
+  // Show pending approval screen
+  if (salon.approvalStatus === "pending") {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navigation />
+        <div className="container mx-auto px-4 py-16 max-w-2xl">
+          <Card className="border-2 border-amber-200">
+            <CardContent className="pt-12 pb-12 text-center">
+              <Clock className="h-16 w-16 text-amber-500 mx-auto mb-4" />
+              <h1 className="text-2xl font-bold mb-2">Pending Approval</h1>
+              <p className="text-muted-foreground mb-6">
+                Your salon <span className="font-semibold">{salon.name}</span> is currently under review by our moderators.
+              </p>
+              <div className="bg-amber-50 p-4 rounded-lg mb-6">
+                <p className="text-sm text-amber-800">
+                  <strong>What happens next?</strong><br />
+                  Our regional moderator will review your salon details and approve it within 24-48 hours.
+                  Once approved, your salon will be visible to customers and you can access the full dashboard.
+                </p>
+              </div>
+              <div className="text-left space-y-2 text-sm text-muted-foreground">
+                <p><strong>Salon Name:</strong> {salon.name}</p>
+                <p><strong>Location:</strong> {salon.city}</p>
+                <p><strong>Submitted:</strong> {new Date(salon.createdAt).toLocaleDateString()}</p>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  // Show rejection screen with feedback
+  if (salon.approvalStatus === "rejected") {
+    return (
+      <div className="min-h-screen bg-background">
+        <Navigation />
+        <div className="container mx-auto px-4 py-16 max-w-2xl">
+          <Card className="border-2 border-red-200">
+            <CardContent className="pt-12 pb-12">
+              <XCircle className="h-16 w-16 text-red-500 mx-auto mb-4" />
+              <h1 className="text-2xl font-bold mb-2 text-center">Application Rejected</h1>
+              <p className="text-muted-foreground mb-6 text-center">
+                Your salon application for <span className="font-semibold">{salon.name}</span> was not approved.
+              </p>
+              <div className="bg-red-50 p-4 rounded-lg mb-6">
+                <p className="text-sm font-semibold text-red-800 mb-2">Moderator Feedback:</p>
+                <p className="text-sm text-red-700">{salon.rejectionReason || "No specific reason provided."}</p>
+              </div>
+              <div className="bg-blue-50 p-4 rounded-lg mb-6">
+                <p className="text-sm text-blue-800">
+                  <strong>What to do next?</strong><br />
+                  Please review the feedback above and update your salon details accordingly.
+                  You can edit your salon information using the buttons below.
+                </p>
+              </div>
+              <div className="flex gap-3">
+                <Button className="flex-1" onClick={() => setIsEditingSalon(true)}>
+                  <Edit className="h-4 w-4 mr-2" />
+                  Edit Salon Details
+                </Button>
+                <Button variant="outline" className="flex-1" onClick={() => router.push("/")}
+>Back to Home</Button>
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    );
+  }
+
+  const groupBookings = (bookingsList: Booking[]) => {
+    const groups: { [key: string]: Booking[] } = {};
+    bookingsList.forEach((booking) => {
+      const customerId = booking.customerId?._id || booking.customerId?.id || booking.customerId;
+      const key = `${customerId}-${booking.bookingDate}-${booking.startTime}-${booking.staffId}`;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(booking);
+    });
+    return Object.values(groups);
+  };
+
   const today = new Date().toISOString().split("T")[0];
+  const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split("T")[0];
   const todayBookings = bookings.filter(b => b.bookingDate === today);
-  const upcomingBookings = bookings.filter(b => 
+  const upcomingBookings = groupBookings(bookings.filter(b => 
     b.bookingDate >= today && (b.status === "confirmed" || b.status === "pending")
-  );
+  ));
   const pendingBookings = bookings.filter(b => b.status === "pending");
+  const last7DaysCompleted = bookings.filter(b => 
+    b.status === "completed" && b.bookingDate >= sevenDaysAgo && b.bookingDate <= today
+  );
   const totalRevenue = bookings
     .filter(b => b.status === "completed")
     .reduce((sum, b) => {
-      const service = services.find(s => s.id === b.serviceId);
+      const service = services.find(s => s.id?.toString() === b.serviceId?.toString());
       return sum + (service?.price || 0);
     }, 0);
 
-  const BookingCard = ({ booking }: { booking: Booking }) => {
-    const service = services.find(s => s.id === booking.serviceId);
-    const staffMember = staff.find(s => s.id === booking.staffId);
+  const BookingCard = ({ bookings: bookingGroup }: { bookings: Booking[] }) => {
+    const booking = bookingGroup[0];
+    const staffName = booking.staffId?.name || staff.find(s => s.id?.toString() === booking.staffId?.toString())?.name;
+    const customerName = booking.customerId?.name || booking.customerId?.phone || "Unknown Customer";
+    
+    const serviceDetails = bookingGroup.map(b => {
+      const service = b.serviceId || services.find(s => s.id?.toString() === b.serviceId?.toString());
+      return {
+        name: service?.name || "Unknown Service",
+        duration: service?.durationMinutes || 0,
+        price: service?.price || 0
+      };
+    });
+    
+    const totalPrice = serviceDetails.reduce((sum, s) => sum + s.price, 0);
+    const totalDuration = serviceDetails.reduce((sum, s) => sum + s.duration, 0);
+    
+    // Calculate correct end time based on total duration
+    const [startHour, startMin] = booking.startTime.split(':').map(Number);
+    const startTimeInMin = startHour * 60 + startMin;
+    const endTimeInMin = startTimeInMin + totalDuration;
+    const endHour = Math.floor(endTimeInMin / 60);
+    const endMin = endTimeInMin % 60;
+    const calculatedEndTime = `${String(endHour).padStart(2, '0')}:${String(endMin).padStart(2, '0')}`;
 
     return (
       <Card>
         <CardContent className="pt-6">
           <div className="flex items-start justify-between mb-4">
             <div className="flex-1">
-              <h3 className="font-semibold mb-1">{service?.name || "Unknown Service"}</h3>
+              <h3 className="font-semibold mb-1">{customerName}</h3>
+              <div className="text-sm text-muted-foreground mb-1">
+                {serviceDetails.map((service, idx) => (
+                  <div key={idx} className="flex items-center justify-between">
+                    <span>• {service.name}</span>
+                    <span className="text-xs ml-2">({service.duration} min)</span>
+                  </div>
+                ))}
+              </div>
               <p className="text-sm text-muted-foreground">
-                {staffMember?.name || "Unknown Staff"}
+                Staff: {staffName || "Unknown Staff"}
               </p>
             </div>
             {getStatusBadge(booking.status)}
@@ -487,12 +705,12 @@ export default function DashboardPage() {
             </div>
             <div className="flex items-center gap-2">
               <Clock className="h-4 w-4 text-muted-foreground" />
-              <span>{booking.startTime} - {booking.endTime}</span>
+              <span>{booking.startTime} - {calculatedEndTime} ({totalDuration} min)</span>
             </div>
-            {service && (
+            {totalPrice > 0 && (
               <div className="flex items-center gap-2">
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
-                <span>${service.price.toFixed(2)}</span>
+                <span>${totalPrice.toFixed(2)}</span>
               </div>
             )}
           </div>
@@ -508,7 +726,11 @@ export default function DashboardPage() {
               <Button 
                 size="sm" 
                 className="flex-1"
-                onClick={() => updateBookingStatus(booking.id, "confirmed")}
+                onClick={async () => {
+                  for (const b of bookingGroup) {
+                    await updateBookingStatus(b.id, "confirmed");
+                  }
+                }}
               >
                 Confirm
               </Button>
@@ -516,7 +738,11 @@ export default function DashboardPage() {
                 size="sm" 
                 variant="outline"
                 className="flex-1"
-                onClick={() => updateBookingStatus(booking.id, "cancelled")}
+                onClick={async () => {
+                  for (const b of bookingGroup) {
+                    await updateBookingStatus(b.id, "cancelled");
+                  }
+                }}
               >
                 Decline
               </Button>
@@ -527,7 +753,11 @@ export default function DashboardPage() {
             <Button 
               size="sm" 
               className="w-full"
-              onClick={() => updateBookingStatus(booking.id, "completed")}
+              onClick={async () => {
+                for (const b of bookingGroup) {
+                  await updateBookingStatus(b.id, "completed");
+                }
+              }}
             >
               Mark Complete
             </Button>
@@ -538,13 +768,13 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background">
+    <div className="min-h-screen">
       <Navigation />
 
       <div className="container mx-auto px-4 py-8">
         <div className="mb-8 flex items-start justify-between">
           <div>
-            <h1 className="text-3xl font-bold mb-2">Dashboard</h1>
+            <h1 className="text-3xl font-bold mb-2 luxury-gradient-text">Dashboard</h1>
             <p className="text-muted-foreground flex items-center gap-2">
               {salon.name} • Rating: {salon.rating.toFixed(1)} ⭐
               {salon.isVerified && (
@@ -554,8 +784,102 @@ export default function DashboardPage() {
                 </Badge>
               )}
             </p>
+
           </div>
           <div className="flex gap-2">
+            <Dialog open={isEditingSalon} onOpenChange={setIsEditingSalon}>
+              <DialogTrigger asChild>
+                <Button variant="outline">
+                  <Edit className="h-4 w-4 mr-2" />
+                  Edit Salon
+                </Button>
+              </DialogTrigger>
+              <DialogContent className="max-w-2xl">
+                <form onSubmit={handleSalonSubmit}>
+                  <DialogHeader>
+                    <DialogTitle>Edit Salon Details</DialogTitle>
+                    <DialogDescription>
+                      Update your salon information
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-4 py-4 max-h-[60vh] overflow-y-auto">
+                    <div className="space-y-2">
+                      <Label htmlFor="salonName">Salon Name *</Label>
+                      <Input
+                        id="salonName"
+                        required
+                        value={salonForm.name}
+                        onChange={(e) => setSalonForm({ ...salonForm, name: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="description">Description *</Label>
+                      <Textarea
+                        id="description"
+                        required
+                        value={salonForm.description}
+                        onChange={(e) => setSalonForm({ ...salonForm, description: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="address">Address *</Label>
+                      <Input
+                        id="address"
+                        required
+                        value={salonForm.address}
+                        onChange={(e) => setSalonForm({ ...salonForm, address: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="city">City *</Label>
+                      <Input
+                        id="city"
+                        required
+                        value={salonForm.city}
+                        onChange={(e) => setSalonForm({ ...salonForm, city: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="phone">Phone *</Label>
+                      <Input
+                        id="phone"
+                        required
+                        value={salonForm.phone}
+                        onChange={(e) => setSalonForm({ ...salonForm, phone: e.target.value })}
+                      />
+                    </div>
+                    <div className="grid grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor="openingTime">Opening Time *</Label>
+                        <Input
+                          id="openingTime"
+                          type="time"
+                          required
+                          value={salonForm.openingTime}
+                          onChange={(e) => setSalonForm({ ...salonForm, openingTime: e.target.value })}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor="closingTime">Closing Time *</Label>
+                        <Input
+                          id="closingTime"
+                          type="time"
+                          required
+                          value={salonForm.closingTime}
+                          onChange={(e) => setSalonForm({ ...salonForm, closingTime: e.target.value })}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                  <DialogFooter>
+                    <Button type="button" variant="outline" onClick={() => setIsEditingSalon(false)}>
+                      Cancel
+                    </Button>
+                    <Button type="submit">Save Changes</Button>
+                  </DialogFooter>
+                </form>
+              </DialogContent>
+            </Dialog>
             <Dialog open={isBannerDialogOpen} onOpenChange={setIsBannerDialogOpen}>
               <DialogTrigger asChild>
                 <Button variant="outline">
@@ -568,32 +892,38 @@ export default function DashboardPage() {
                   <DialogHeader>
                     <DialogTitle>Salon Banner Image</DialogTitle>
                     <DialogDescription>
-                      Update your salon's banner image that appears on listing cards
+                      Upload your salon's banner image that appears on listing cards
                     </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4 py-4">
-                    {bannerUrl && (
+                    {bannerPreview && (
                       <div className="relative w-full h-48 rounded-lg overflow-hidden border bg-muted">
                         <Image
-                          src={bannerUrl}
+                          src={bannerPreview}
                           alt="Banner preview"
                           fill
                           className="object-cover"
-                          onError={() => toast.error("Invalid image URL")}
+                          onError={() => toast.error("Invalid image")}
                         />
                       </div>
                     )}
                     <div className="space-y-2">
-                      <Label htmlFor="bannerUrl">Image URL</Label>
+                      <Label htmlFor="bannerUpload">Upload Image *</Label>
                       <Input
-                        id="bannerUrl"
-                        placeholder="https://example.com/image.jpg"
-                        value={bannerUrl}
-                        onChange={(e) => setBannerUrl(e.target.value)}
-                        required
+                        id="bannerUpload"
+                        type="file"
+                        accept="image/*"
+                        onChange={async (e) => {
+                          const file = e.target.files?.[0];
+                          if (file) {
+                            const compressed = await compressBannerImage(file);
+                            setBannerUrl(compressed);
+                            setBannerPreview(compressed);
+                          }
+                        }}
                       />
                       <p className="text-xs text-muted-foreground">
-                        Enter a public URL of your salon's banner image
+                        Image will be automatically resized and compressed
                       </p>
                     </div>
                   </div>
@@ -601,7 +931,7 @@ export default function DashboardPage() {
                     <Button type="button" variant="outline" onClick={() => setIsBannerDialogOpen(false)}>
                       Cancel
                     </Button>
-                    <Button type="submit" disabled={isUploadingBanner}>
+                    <Button type="submit" disabled={isUploadingBanner || !bannerUrl}>
                       {isUploadingBanner ? "Saving..." : "Save Banner"}
                     </Button>
                   </DialogFooter>
@@ -670,7 +1000,7 @@ export default function DashboardPage() {
 
         {/* Stats Cards */}
         <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-4 mb-8">
-          <Card>
+          <Card className="luxury-card">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Today's Bookings</CardTitle>
               <Calendar className="h-4 w-4 text-muted-foreground" />
@@ -683,7 +1013,7 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="luxury-card">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Pending Approvals</CardTitle>
               <AlertCircle className="h-4 w-4 text-muted-foreground" />
@@ -696,7 +1026,7 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="luxury-card">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
               <DollarSign className="h-4 w-4 text-muted-foreground" />
@@ -709,7 +1039,7 @@ export default function DashboardPage() {
             </CardContent>
           </Card>
 
-          <Card>
+          <Card className="luxury-card">
             <CardHeader className="flex flex-row items-center justify-between pb-2">
               <CardTitle className="text-sm font-medium">Team Members</CardTitle>
               <Users className="h-4 w-4 text-muted-foreground" />
@@ -735,6 +1065,12 @@ export default function DashboardPage() {
             <TabsTrigger value="staff">
               Staff ({staff.length})
             </TabsTrigger>
+            <TabsTrigger value="completed">
+              Completed (Last 7 Days)
+            </TabsTrigger>
+            <TabsTrigger value="reviews">
+              Reviews ({reviews.length})
+            </TabsTrigger>
           </TabsList>
 
           <TabsContent value="bookings" className="space-y-4">
@@ -759,8 +1095,8 @@ export default function DashboardPage() {
               </Card>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {upcomingBookings.map((booking) => (
-                  <BookingCard key={booking.id} booking={booking} />
+                {upcomingBookings.map((group, idx) => (
+                  <BookingCard key={idx} bookings={group} />
                 ))}
               </div>
             )}
@@ -778,7 +1114,7 @@ export default function DashboardPage() {
                   if (!open) resetServiceForm();
                 }}>
                   <DialogTrigger asChild>
-                    <Button>
+                    <Button className="luxury-button">
                       <Plus className="h-4 w-4 mr-2" />
                       Add Service
                     </Button>
@@ -862,7 +1198,7 @@ export default function DashboardPage() {
                   <p className="text-muted-foreground mb-6">
                     Add services to start accepting bookings
                   </p>
-                  <Button onClick={() => setIsServiceDialogOpen(true)}>
+                  <Button className="luxury-button" onClick={() => setIsServiceDialogOpen(true)}>
                     <Plus className="h-4 w-4 mr-2" />
                     Add Your First Service
                   </Button>
@@ -933,7 +1269,7 @@ export default function DashboardPage() {
                   if (!open) resetStaffForm();
                 }}>
                   <DialogTrigger asChild>
-                    <Button>
+                    <Button className="luxury-button">
                       <Plus className="h-4 w-4 mr-2" />
                       Add Staff
                     </Button>
@@ -993,7 +1329,7 @@ export default function DashboardPage() {
                   <p className="text-muted-foreground mb-6">
                     Add staff members to manage schedules
                   </p>
-                  <Button onClick={() => setIsStaffDialogOpen(true)}>
+                  <Button className="luxury-button" onClick={() => setIsStaffDialogOpen(true)}>
                     <Plus className="h-4 w-4 mr-2" />
                     Add Your First Staff Member
                   </Button>
@@ -1040,9 +1376,88 @@ export default function DashboardPage() {
                       </div>
                       <div className="pt-4 border-t">
                         <p className="text-xs text-muted-foreground">
-                          {bookings.filter(b => b.staffId === member.id && b.status === "confirmed").length} upcoming bookings
+                          {bookings.filter(b => b.staffId?.toString() === member.id?.toString() && b.status === "confirmed").length} upcoming bookings
                         </p>
                       </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="completed" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Completed Bookings (Last 7 Days)</CardTitle>
+                <CardDescription>
+                  View your recently completed appointments
+                </CardDescription>
+              </CardHeader>
+            </Card>
+
+            {last7DaysCompleted.length === 0 ? (
+              <Card>
+                <CardContent className="pt-12 pb-12 text-center">
+                  <CheckCircle className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold mb-2">No Completed Bookings</h3>
+                  <p className="text-muted-foreground">
+                    Completed bookings from the last 7 days will appear here
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
+                {groupBookings(last7DaysCompleted).map((group, idx) => (
+                  <BookingCard key={idx} bookings={group} />
+                ))}
+              </div>
+            )}
+          </TabsContent>
+
+          <TabsContent value="reviews" className="space-y-4">
+            <Card>
+              <CardHeader>
+                <CardTitle>Customer Reviews</CardTitle>
+                <CardDescription>
+                  See what your customers are saying
+                </CardDescription>
+              </CardHeader>
+            </Card>
+
+            {reviews.length === 0 ? (
+              <Card>
+                <CardContent className="pt-12 pb-12 text-center">
+                  <TrendingUp className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+                  <h3 className="text-lg font-semibold mb-2">No Reviews Yet</h3>
+                  <p className="text-muted-foreground">
+                    Customer reviews will appear here
+                  </p>
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid gap-4">
+                {reviews.map((review: any) => (
+                  <Card key={review._id || review.id}>
+                    <CardContent className="pt-6">
+                      <div className="flex items-start justify-between mb-3">
+                        <div>
+                          <h3 className="font-semibold">{review.customerId?.name || "Anonymous"}</h3>
+                          <div className="flex items-center gap-1 mt-1">
+                            {[...Array(5)].map((_, i) => (
+                              <span key={i} className={i < review.rating ? "text-yellow-500" : "text-gray-300"}>
+                                ★
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                        <span className="text-sm text-muted-foreground">
+                          {new Date(review.createdAt).toLocaleDateString()}
+                        </span>
+                      </div>
+                      {review.comment && (
+                        <p className="text-sm text-muted-foreground">{review.comment}</p>
+                      )}
                     </CardContent>
                   </Card>
                 ))}

@@ -144,13 +144,73 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
+    -webkit-tap-highlight-color: transparent;
   }
   body {
-    @apply bg-background text-foreground;
+    @apply bg-gradient-to-br from-purple-50 via-pink-50 to-amber-50 dark:from-gray-950 dark:via-purple-950 dark:to-pink-950 text-foreground;
+    background-attachment: fixed;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overscroll-behavior: none;
+  }
+  html {
+    -webkit-text-size-adjust: 100%;
+    touch-action: manipulation;
+  }
+}
+
+@layer utilities {
+  .luxury-gradient {
+    @apply bg-gradient-to-br from-purple-600 via-pink-600 to-amber-600;
+  }
+  
+  .luxury-gradient-text {
+    @apply bg-gradient-to-r from-purple-600 via-pink-600 to-amber-600 bg-clip-text text-transparent;
+  }
+  
+  .luxury-card {
+    @apply bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-2 border-purple-200/50 dark:border-purple-800/50 shadow-2xl shadow-purple-500/10;
+  }
+  
+  .luxury-button {
+    @apply bg-gradient-to-r from-purple-600 via-pink-600 to-amber-600 hover:from-purple-700 hover:via-pink-700 hover:to-amber-700 text-white shadow-lg shadow-purple-500/30 transition-all duration-300;
+    -webkit-tap-highlight-color: transparent;
+  }
+  
+  .touch-manipulation {
+    touch-action: manipulation;
   }
 }
 
 /* Hide Next.js error overlay portal */
 nextjs-portal {
   display: none !important;
+}
+
+/* Mobile optimizations */
+@media (max-width: 640px) {
+  input, select, textarea, button {
+    font-size: 16px !important;
+  }
+  
+  /* Improve touch targets */
+  button, a {
+    min-height: 44px;
+  }
+  
+  /* Better spacing for mobile */
+  .container {
+    padding-left: 1rem;
+    padding-right: 1rem;
+  }
+}
+
+/* Prevent horizontal scroll */
+body {
+  overflow-x: hidden;
+}
+
+/* Smooth scrolling */
+html {
+  scroll-behavior: smooth;
 }

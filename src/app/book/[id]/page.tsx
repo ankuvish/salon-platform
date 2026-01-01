@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Navigation from "@/components/Navigation";
+import AuthDialog from "@/components/AuthDialog";
 import { useSession } from "@/lib/auth-client";
 import { apiRequest } from "@/lib/api-config";
 import { Button } from "@/components/ui/button";
@@ -50,7 +51,8 @@ export default function BookAppointmentPage() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { data: session, isPending: sessionLoading } = useSession();
-  const salonId = params.id as string;
+  const urlParam = params.id as string;
+  const salonId = urlParam.includes('-') ? urlParam.split('-').pop() || urlParam : urlParam;
   const preSelectedServiceId = searchParams.get("service");
 
   const [salon, setSalon] = useState<Salon | null>(null);
@@ -59,17 +61,20 @@ export default function BookAppointmentPage() {
   const [availableSlots, setAvailableSlots] = useState<TimeSlot[]>([]);
   const [bookedSlots, setBookedSlots] = useState<TimeSlot[]>([]);
 
-  const [selectedServiceId, setSelectedServiceId] = useState<string>(preSelectedServiceId || "");
+  const [selectedServices, setSelectedServices] = useState<string[]>(preSelectedServiceId ? [preSelectedServiceId] : []);
   const [selectedStaffId, setSelectedStaffId] = useState<string>("");
   const [selectedDate, setSelectedDate] = useState<Date | undefined>(undefined);
   const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
   const [notes, setNotes] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<string>("cash");
+  const [termsAccepted, setTermsAccepted] = useState(false);
 
   const [isLoading, setIsLoading] = useState(true);
   const [isLoadingSlots, setIsLoadingSlots] = useState(false);
   const [isBooking, setIsBooking] = useState(false);
   const [bookingSuccess, setBookingSuccess] = useState(false);
+  const [authOpen, setAuthOpen] = useState(false);
+  const bookingAttempted = useRef(false);
 
   useEffect(() => {
     if (salonId) {
@@ -78,18 +83,55 @@ export default function BookAppointmentPage() {
   }, [salonId]);
 
   useEffect(() => {
-    if (selectedDate && selectedStaffId && selectedServiceId) {
+    if (selectedDate && selectedStaffId && selectedServices.length > 0) {
+      setSelectedSlot(null);
       fetchAvailability();
     } else {
       setAvailableSlots([]);
       setBookedSlots([]);
       setSelectedSlot(null);
     }
-  }, [selectedDate, selectedStaffId, selectedServiceId]);
+  }, [selectedDate, selectedStaffId, selectedServices]);
+
+  useEffect(() => {
+    if (session?.user && bookingAttempted.current) {
+      bookingAttempted.current = false;
+      setAuthOpen(false);
+      toast.success("You're now logged in! Confirming your booking...");
+      setTimeout(() => handleBooking(), 500);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [session]);
 
   const fetchBookingData = async () => {
     try {
       setIsLoading(true);
+      
+      // Handle dummy salons
+      if (urlParam.includes('dummy-')) {
+        const dummySalons = [
+          { _id: "dummy-9999", id: 9999, name: "Luxury Hair Studio", address: "123 Fashion Street", city: "Mumbai" },
+          { _id: "dummy-9998", id: 9998, name: "Elite Beauty Lounge", address: "456 Style Avenue", city: "Delhi" },
+          { _id: "dummy-9997", id: 9997, name: "Gentleman's Grooming", address: "789 Barber Lane", city: "Bangalore" },
+        ];
+        const dummySalon = dummySalons.find(s => urlParam.includes(s._id));
+        if (dummySalon) {
+          setSalon({ ...dummySalon, id: dummySalon.id });
+          setServices([
+            { id: 1, name: "Haircut", description: "Professional haircut with styling", durationMinutes: 30, price: 500 },
+            { id: 2, name: "Hair Coloring", description: "Full hair coloring service", durationMinutes: 90, price: 2500 },
+            { id: 3, name: "Facial", description: "Relaxing facial treatment", durationMinutes: 45, price: 1200 },
+            { id: 4, name: "Manicure", description: "Complete nail care", durationMinutes: 30, price: 800 },
+          ]);
+          setStaff([
+            { id: 1, name: "Sarah Johnson", specialization: "Hair Stylist" },
+            { id: 2, name: "Mike Chen", specialization: "Barber" },
+            { id: 3, name: "Emma Davis", specialization: "Beautician" },
+          ]);
+        }
+        setIsLoading(false);
+        return;
+      }
       
       const [salonRes, servicesRes, staffRes] = await Promise.all([
         apiRequest(`/api/salons/${salonId}`),
@@ -99,17 +141,17 @@ export default function BookAppointmentPage() {
 
       if (salonRes.ok) {
         const salonData = await salonRes.json();
-        setSalon(salonData);
+        setSalon({ ...salonData, id: salonData._id || salonData.id });
       }
 
       if (servicesRes.ok) {
         const servicesData = await servicesRes.json();
-        setServices(servicesData);
+        setServices(servicesData.map((s: any) => ({ ...s, id: s._id || s.id })));
       }
 
       if (staffRes.ok) {
         const staffData = await staffRes.json();
-        setStaff(staffData);
+        setStaff(staffData.map((s: any) => ({ ...s, id: s._id || s.id })));
       }
     } catch (error) {
       console.error("Failed to fetch booking data:", error);
@@ -120,28 +162,47 @@ export default function BookAppointmentPage() {
   };
 
   const fetchAvailability = async () => {
-    if (!selectedDate || !selectedStaffId || !selectedServiceId) return;
+    if (!selectedDate || !selectedStaffId || selectedServices.length === 0) return;
 
     try {
       setIsLoadingSlots(true);
-      const dateStr = selectedDate.toISOString().split("T")[0];
+      const year = selectedDate.getFullYear();
+      const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+      const day = String(selectedDate.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
+      const totalDuration = selectedServices.reduce((sum, serviceId) => {
+        const service = services.find(s => s.id.toString() === serviceId);
+        return sum + (service?.durationMinutes || 0);
+      }, 0);
+      
+      // Generate dummy slots for dummy salons
+      if (urlParam.includes('dummy-')) {
+        const slots = [];
+        for (let hour = 9; hour < 20; hour++) {
+          slots.push({ startTime: `${hour.toString().padStart(2, '0')}:00`, endTime: `${(hour + 1).toString().padStart(2, '0')}:00`, available: true });
+          slots.push({ startTime: `${hour.toString().padStart(2, '0')}:30`, endTime: `${hour.toString().padStart(2, '0')}:30`, available: true });
+        }
+        setAvailableSlots(slots);
+        setBookedSlots([]);
+        setIsLoadingSlots(false);
+        return;
+      }
       
       const response = await apiRequest(
-        `/api/availability?salon_id=${salonId}&staff_id=${selectedStaffId}&date=${dateStr}&service_id=${selectedServiceId}`
+        `/api/availability?salon_id=${salonId}&staff_id=${selectedStaffId}&date=${dateStr}&service_id=${selectedServices[0]}&duration=${totalDuration}`
       );
 
       if (response.ok) {
         const data = await response.json();
-        setAvailableSlots(data.slots?.filter((s: any) => s.available) || []);
-        setBookedSlots(data.slots?.filter((s: any) => s.booked) || []);
+        const allSlots = data.slots || [];
+        setAvailableSlots(allSlots.filter((s: any) => s.available) || []);
+        setBookedSlots(allSlots.filter((s: any) => s.booked) || []);
       } else {
-        toast.error("Failed to fetch available time slots");
         setAvailableSlots([]);
         setBookedSlots([]);
       }
     } catch (error) {
       console.error("Failed to fetch availability:", error);
-      toast.error("Failed to fetch available time slots");
       setAvailableSlots([]);
       setBookedSlots([]);
     } finally {
@@ -151,12 +212,17 @@ export default function BookAppointmentPage() {
 
   const handleBooking = async () => {
     if (!session?.user) {
+      if (selectedServices.length === 0 || !selectedStaffId || !selectedDate || !selectedSlot || !paymentMethod) {
+        toast.error("Please complete all booking details first");
+        return;
+      }
       toast.error("Please sign in to book an appointment");
-      router.push(`/login?redirect=/book/${salonId}`);
+      setAuthOpen(true);
+      bookingAttempted.current = true;
       return;
     }
 
-    if (!selectedServiceId || !selectedStaffId || !selectedDate || !selectedSlot) {
+    if (selectedServices.length === 0 || !selectedStaffId || !selectedDate || !selectedSlot) {
       toast.error("Please complete all booking details");
       return;
     }
@@ -166,30 +232,66 @@ export default function BookAppointmentPage() {
       return;
     }
 
+    if (!termsAccepted) {
+      toast.error("Please accept the terms and conditions");
+      return;
+    }
+
     try {
       setIsBooking(true);
-      const dateStr = selectedDate.toISOString().split("T")[0];
+      const year = selectedDate.getFullYear();
+      const month = String(selectedDate.getMonth() + 1).padStart(2, '0');
+      const day = String(selectedDate.getDate()).padStart(2, '0');
+      const dateStr = `${year}-${month}-${day}`;
 
-      const response = await apiRequest("/api/bookings", {
-        method: "POST",
-        body: JSON.stringify({
-          customerId: session.user.id,
-          salonId: parseInt(salonId),
-          serviceId: parseInt(selectedServiceId),
-          staffId: parseInt(selectedStaffId),
-          bookingDate: dateStr,
-          startTime: selectedSlot.startTime,
-          endTime: selectedSlot.endTime,
-          status: "pending",
-          notes: notes.trim() || null,
-          paymentMethod: paymentMethod,
-          paymentStatus: paymentMethod === "cash" ? "pending" : "processing",
-        }),
-      });
+      // Calculate total duration and end time
+      const totalDuration = selectedServices.reduce((sum, serviceId) => {
+        const service = services.find(s => s.id.toString() === serviceId);
+        return sum + (service?.durationMinutes || 0);
+      }, 0);
 
-      if (response.ok) {
-        const booking = await response.json();
+      const [startHour, startMin] = selectedSlot.startTime.split(':').map(Number);
+      let endHour = startHour;
+      let endMin = startMin + totalDuration;
+      if (endMin >= 60) {
+        endHour += Math.floor(endMin / 60);
+        endMin = endMin % 60;
+      }
+      const calculatedEndTime = `${endHour.toString().padStart(2, '0')}:${endMin.toString().padStart(2, '0')}`;
 
+      // Create bookings for each service
+      const bookingPromises = selectedServices.map(serviceId => 
+        apiRequest("/api/bookings", {
+          method: "POST",
+          body: JSON.stringify({
+            customerId: session.user.id,
+            salonId: salonId,
+            serviceId: serviceId,
+            staffId: selectedStaffId,
+            bookingDate: dateStr,
+            startTime: selectedSlot.startTime,
+            endTime: calculatedEndTime,
+            status: "pending",
+            notes: notes.trim() || null,
+            paymentMethod: paymentMethod,
+            paymentStatus: paymentMethod === "cash" ? "pending" : "processing",
+          }),
+        })
+      );
+
+      const responses = await Promise.all(bookingPromises);
+      const allSuccess = responses.every(r => r.ok);
+      
+      // Log any failures
+      for (let i = 0; i < responses.length; i++) {
+        if (!responses[i].ok) {
+          const errorData = await responses[i].json();
+          console.error('Booking failed:', errorData);
+          toast.error(`Booking failed: ${errorData.details || errorData.error}`);
+        }
+      }
+
+      if (allSuccess) {
         if (paymentMethod === "online" || paymentMethod === "netbanking") {
           toast.info("Redirecting to payment gateway...");
           setTimeout(() => {
@@ -205,8 +307,7 @@ export default function BookAppointmentPage() {
           router.push("/my-bookings");
         }, 3000);
       } else {
-        const error = await response.json();
-        toast.error(error.error || "Failed to book appointment");
+        toast.error("Failed to book appointment");
       }
     } catch (error) {
       console.error("Booking failed:", error);
@@ -243,6 +344,13 @@ export default function BookAppointmentPage() {
     );
   }
 
+  const selectedServicesList = services.filter(s => selectedServices.includes(s.id.toString()));
+  const totalPrice = selectedServicesList.reduce((sum, s) => sum + s.price, 0);
+  const totalDuration = selectedServicesList.reduce((sum, s) => sum + s.durationMinutes, 0);
+  const allSlots = [...availableSlots, ...bookedSlots].sort((a, b) => {
+    return a.startTime.localeCompare(b.startTime);
+  });
+
   if (bookingSuccess) {
     return (
       <div className="min-h-screen bg-background">
@@ -252,9 +360,22 @@ export default function BookAppointmentPage() {
             <CardContent className="pt-12 pb-12">
               <CheckCircle2 className="h-16 w-16 text-green-500 mx-auto mb-4" />
               <h1 className="text-3xl font-bold mb-2">Booking Confirmed!</h1>
-              <p className="text-muted-foreground mb-6">
+              <p className="text-muted-foreground mb-4">
                 Your appointment has been successfully booked. {paymentMethod === "cash" ? "You can pay at the salon." : "Your payment has been processed."}
               </p>
+              
+              <div className="bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg p-4 mb-6">
+                <div className="flex items-start gap-3">
+                  <Clock className="h-5 w-5 text-amber-600 dark:text-amber-400 mt-0.5 flex-shrink-0" />
+                  <div className="text-left">
+                    <p className="font-semibold text-amber-900 dark:text-amber-100 text-sm mb-1">Important Reminder</p>
+                    <p className="text-sm text-amber-800 dark:text-amber-200">
+                      Please arrive <span className="font-bold">10 minutes before</span> your scheduled appointment time at <span className="font-bold">{selectedSlot?.startTime}</span> to ensure a smooth check-in process.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              
               <div className="space-y-2 mb-8">
                 <Button asChild className="w-full">
                   <Link href="/my-bookings">View My Bookings</Link>
@@ -270,18 +391,14 @@ export default function BookAppointmentPage() {
     );
   }
 
-  const selectedService = services.find(s => s.id === parseInt(selectedServiceId));
-  const allSlots = [...availableSlots, ...bookedSlots].sort((a, b) => {
-    return a.startTime.localeCompare(b.startTime);
-  });
-
   return (
     <div className="min-h-screen bg-background">
       <Navigation />
+      <AuthDialog open={authOpen} onOpenChange={setAuthOpen} defaultTab="login" />
 
-      <div className="container mx-auto px-4 py-8 max-w-4xl">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Book Appointment</h1>
+      <div className="container mx-auto px-4 py-6 sm:py-8 max-w-4xl">
+        <div className="mb-6 sm:mb-8">
+          <h1 className="text-2xl sm:text-3xl font-bold mb-2">Book Appointment</h1>
           <p className="text-muted-foreground">
             {salon.name} • {salon.address}, {salon.city}
           </p>
@@ -312,34 +429,35 @@ export default function BookAppointmentPage() {
             </CardHeader>
             <CardContent>
               <div className="space-y-2">
-                <Label htmlFor="service">Choose a service</Label>
-                <Select value={selectedServiceId} onValueChange={setSelectedServiceId}>
-                  <SelectTrigger id="service">
-                    <SelectValue placeholder="Select a service" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {services.map((service) => (
-                      <SelectItem key={service.id} value={service.id.toString()}>
-                        {service.name} - ${service.price.toFixed(2)} ({service.durationMinutes} min)
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {selectedService && (
-                  <div className="mt-4 p-4 bg-muted rounded-lg">
-                    <p className="text-sm text-muted-foreground mb-2">{selectedService.description}</p>
-                    <div className="flex items-center gap-4 text-sm">
-                      <Badge variant="secondary">
-                        <Clock className="h-3 w-3 mr-1" />
-                        {selectedService.durationMinutes} minutes
-                      </Badge>
-                      <Badge variant="secondary">
-                        <DollarSign className="h-3 w-3 mr-1" />
-                        ${selectedService.price.toFixed(2)}
-                      </Badge>
+                <Label>Choose services (multiple allowed)</Label>
+                <div className="space-y-2">
+                  {services.map((service) => (
+                    <div key={service.id} className="flex items-start sm:items-center space-x-2 p-3 border rounded-lg hover:bg-accent">
+                      <input
+                        type="checkbox"
+                        id={`service-${service.id}`}
+                        checked={selectedServices.includes(service.id.toString())}
+                        onChange={(e) => {
+                          if (e.target.checked) {
+                            setSelectedServices([...selectedServices, service.id.toString()]);
+                          } else {
+                            setSelectedServices(selectedServices.filter(id => id !== service.id.toString()));
+                          }
+                        }}
+                        className="h-4 w-4"
+                      />
+                      <label htmlFor={`service-${service.id}`} className="flex-1 cursor-pointer">
+                        <div className="flex flex-col sm:flex-row sm:justify-between sm:items-center gap-1 sm:gap-2">
+                          <span className="font-medium text-sm sm:text-base">{service.name}</span>
+                          <div className="flex items-center gap-2 text-xs sm:text-sm text-muted-foreground">
+                            <span>{service.durationMinutes} min</span>
+                            <span className="font-semibold text-primary">₹{service.price.toFixed(2)}</span>
+                          </div>
+                        </div>
+                      </label>
                     </div>
-                  </div>
-                )}
+                  ))}
+                </div>
               </div>
             </CardContent>
           </Card>
@@ -358,7 +476,7 @@ export default function BookAppointmentPage() {
                 <Select 
                   value={selectedStaffId} 
                   onValueChange={setSelectedStaffId}
-                  disabled={!selectedServiceId}
+                  disabled={selectedServices.length === 0}
                 >
                   <SelectTrigger id="staff">
                     <SelectValue placeholder="Select a staff member" />
@@ -366,7 +484,7 @@ export default function BookAppointmentPage() {
                   <SelectContent>
                     {staff.map((member) => (
                       <SelectItem key={member.id} value={member.id.toString()}>
-                        {member.name} - {member.specialization}
+                        {member.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -391,7 +509,14 @@ export default function BookAppointmentPage() {
                     mode="single"
                     selected={selectedDate}
                     onSelect={setSelectedDate}
-                    disabled={(date) => date < new Date() || date < new Date(new Date().setHours(0, 0, 0, 0))}
+                    disabled={(date) => {
+                      const utc = new Date();
+                      const istOffset = 5.5 * 60 * 60 * 1000;
+                      const ist = new Date(utc.getTime() + istOffset);
+                      const istToday = new Date(ist.getUTCFullYear(), ist.getUTCMonth(), ist.getUTCDate());
+                      const checkDate = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+                      return checkDate < istToday;
+                    }}
                     className="rounded-md border"
                     classNames={{
                       months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
@@ -441,7 +566,7 @@ export default function BookAppointmentPage() {
                         No time slots available for this date.
                       </p>
                     ) : (
-                      <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 gap-2">
+                      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
                         {allSlots.map((slot, index) => {
                           const isBooked = slot.isBooked;
                           const isSelected = selectedSlot?.startTime === slot.startTime;
@@ -544,15 +669,25 @@ export default function BookAppointmentPage() {
             <CardContent>
               <div className="space-y-3 mb-6">
                 <div className="flex justify-between text-sm">
-                  <span className="text-muted-foreground">Service:</span>
+                  <span className="text-muted-foreground">Services:</span>
                   <span className="font-medium">
-                    {selectedService?.name || "Not selected"}
+                    {selectedServicesList.length > 0 ? `${selectedServicesList.length} selected` : "Not selected"}
                   </span>
                 </div>
+                {selectedServicesList.length > 0 && (
+                  <div className="pl-4 space-y-1">
+                    {selectedServicesList.map(service => (
+                      <div key={service.id} className="flex justify-between text-xs text-muted-foreground">
+                        <span>• {service.name}</span>
+                        <span>₹{service.price.toFixed(2)}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Staff:</span>
                   <span className="font-medium">
-                    {staff.find(s => s.id === parseInt(selectedStaffId))?.name || "Not selected"}
+                    {staff.find(s => s.id.toString() === selectedStaffId)?.name || "Not selected"}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
@@ -564,7 +699,16 @@ export default function BookAppointmentPage() {
                 <div className="flex justify-between text-sm">
                   <span className="text-muted-foreground">Time:</span>
                   <span className="font-medium">
-                    {selectedSlot ? `${selectedSlot.startTime} - ${selectedSlot.endTime}` : "Not selected"}
+                    {selectedSlot ? `${selectedSlot.startTime} - ${(() => {
+                      const [startHour, startMin] = selectedSlot.startTime.split(':').map(Number);
+                      let endHour = startHour;
+                      let endMin = startMin + totalDuration;
+                      if (endMin >= 60) {
+                        endHour += Math.floor(endMin / 60);
+                        endMin = endMin % 60;
+                      }
+                      return `${endHour.toString().padStart(2, '0')}:${endMin.toString().padStart(2, '0')}`;
+                    })()}` : "Not selected"}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm">
@@ -573,12 +717,38 @@ export default function BookAppointmentPage() {
                     {paymentMethod === "cash" ? "Pay at Salon" : paymentMethod === "online" ? "Online Payment" : "Net Banking"}
                   </span>
                 </div>
+                <div className="flex justify-between text-sm">
+                  <span className="text-muted-foreground">Duration:</span>
+                  <span className="font-medium">
+                    {totalDuration > 0 ? `${totalDuration} minutes` : "Not selected"}
+                  </span>
+                </div>
                 <div className="flex justify-between text-sm pt-3 border-t">
                   <span className="text-muted-foreground">Total:</span>
                   <span className="font-bold text-lg">
-                    ${selectedService?.price.toFixed(2) || "0.00"}
+                    ₹{totalPrice.toFixed(2)}
                   </span>
                 </div>
+              </div>
+
+              <div className="flex items-start space-x-2 mb-4 p-3 border rounded-lg">
+                <input
+                  type="checkbox"
+                  id="terms"
+                  checked={termsAccepted}
+                  onChange={(e) => setTermsAccepted(e.target.checked)}
+                  className="h-4 w-4 mt-1"
+                />
+                <label htmlFor="terms" className="text-sm text-muted-foreground cursor-pointer">
+                  I agree to the{" "}
+                  <Link href="/terms-of-service" target="_blank" className="text-primary hover:underline font-medium">
+                    Terms of Service
+                  </Link>
+                  {" "}and{" "}
+                  <Link href="/privacy-policy" target="_blank" className="text-primary hover:underline font-medium">
+                    Privacy Policy
+                  </Link>
+                </label>
               </div>
 
               <Button
@@ -587,11 +757,12 @@ export default function BookAppointmentPage() {
                 onClick={handleBooking}
                 disabled={
                   !session?.user ||
-                  !selectedServiceId ||
+                  selectedServices.length === 0 ||
                   !selectedStaffId ||
                   !selectedDate ||
                   !selectedSlot ||
                   !paymentMethod ||
+                  !termsAccepted ||
                   isBooking
                 }
               >

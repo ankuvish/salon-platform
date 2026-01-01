@@ -141,19 +141,19 @@ export default function NearbyPage() {
   };
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className="min-h-screen flex flex-col">
       <Navigation />
 
       <div className="container mx-auto px-4 py-8 flex-1">
         <div className="mb-8">
-          <h1 className="text-3xl font-bold mb-2">Find Salons Nearby</h1>
+          <h1 className="text-3xl font-bold mb-2 luxury-gradient-text">Find Salons Nearby</h1>
           <p className="text-muted-foreground">
             Search by salon name, area, zip code, service, or staff name
           </p>
         </div>
 
         {/* Search Card */}
-        <Card className="mb-8">
+        <Card className="mb-8 luxury-card">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <MapPin className="h-5 w-5" />
@@ -170,7 +170,7 @@ export default function NearbyPage() {
                 <Button
                   onClick={getCurrentLocation}
                   disabled={isGettingLocation}
-                  className="flex-1"
+                  className={`flex-1 ${!userLocation ? 'luxury-button' : ''}`}
                   variant={userLocation ? "secondary" : "default"}
                 >
                   {isGettingLocation ? (
@@ -233,7 +233,7 @@ export default function NearbyPage() {
                   </div>
                 )}
 
-                <Button type="submit" className="w-full" disabled={isLoading}>
+                <Button type="submit" className="w-full luxury-button" disabled={isLoading}>
                   {isLoading ? (
                     <>
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />

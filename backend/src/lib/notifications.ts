@@ -25,6 +25,28 @@ export interface BookingNotificationData {
 
 class NotificationService {
   /**
+   * Send new booking notification to salon owner
+   */
+  async sendOwnerBookingNotification(data: BookingNotificationData & { ownerEmail: string; ownerPhone: string }) {
+    const message = `New booking received! Customer: ${data.customerName}, Service: ${data.serviceName}, Date: ${data.bookingDate} at ${data.startTime}. Booking ID: ${data.bookingId}`;
+
+    await Promise.all([
+      this.sendEmail({
+        to: data.ownerEmail,
+        type: "email",
+        subject: "New Booking Alert - SalonBook",
+        message,
+        templateData: data,
+      }),
+      this.sendSMS({
+        to: data.ownerPhone,
+        type: "sms",
+        message,
+      }),
+    ]);
+  }
+
+  /**
    * Send booking confirmation notification
    */
   async sendBookingConfirmation(data: BookingNotificationData) {

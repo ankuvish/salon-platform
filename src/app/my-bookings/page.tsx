@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Calendar, Clock, MapPin, User, X, CheckCircle, Edit } from "lucide-react";
+import { Calendar, Clock, MapPin, User, X, CheckCircle, Edit, Trash2 } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { toast } from "sonner";
 import {
@@ -49,7 +49,7 @@ interface Booking {
 }
 
 export default function MyBookingsPage() {
-  const { data: session, isPending: sessionLoading, refetch } = useSession();
+  const { data: session, isPending: sessionLoading } = useSession();
   const router = useRouter();
 
   const [bookings, setBookings] = useState<Booking[]>([]);
@@ -74,14 +74,7 @@ export default function MyBookingsPage() {
         return;
       }
       
-      // Token exists but session is null - try refetching once
-      if (!hasCheckedAuth) {
-        setHasCheckedAuth(true);
-        refetch();
-        return;
-      }
-      
-      // Already tried refetching and still no session - redirect
+      // Token exists but session is null - redirect to login
       router.push("/login?redirect=/my-bookings");
       return;
     }
@@ -99,7 +92,7 @@ export default function MyBookingsPage() {
       
       if (response.ok) {
         const data = await response.json();
-        setBookings(data);
+        setBookings(data.map((b: any) => ({ ...b, id: b._id || b.id })));
       } else {
         toast.error("Failed to load bookings");
       }
@@ -120,7 +113,7 @@ export default function MyBookingsPage() {
 
       if (response.ok) {
         toast.success("Booking cancelled successfully");
-        fetchBookings(); // Refresh the list
+        fetchBookings();
       } else {
         const error = await response.json();
         toast.error(error.error || "Failed to cancel booking");
@@ -130,6 +123,24 @@ export default function MyBookingsPage() {
       toast.error("Failed to cancel booking");
     } finally {
       setCancellingId(null);
+    }
+  };
+
+  const handleDeleteBooking = async (bookingId: number) => {
+    try {
+      const response = await apiRequest(`/api/bookings/${bookingId}`, {
+        method: "DELETE",
+      });
+
+      if (response.ok) {
+        toast.success("Booking deleted successfully");
+        fetchBookings();
+      } else {
+        toast.error("Failed to delete booking");
+      }
+    } catch (error) {
+      console.error("Failed to delete booking:", error);
+      toast.error("Failed to delete booking");
     }
   };
 
@@ -148,33 +159,45 @@ export default function MyBookingsPage() {
     }
   };
 
+  const groupBookings = (bookingsList: Booking[]) => {
+    const groups: { [key: string]: Booking[] } = {};
+    bookingsList.forEach((booking) => {
+      const key = `${booking.salonId}-${booking.bookingDate}-${booking.startTime}-${booking.staffId}`;
+      if (!groups[key]) groups[key] = [];
+      groups[key].push(booking);
+    });
+    return Object.values(groups);
+  };
+
   const filterBookings = (status: string) => {
     const now = new Date();
     const today = now.toISOString().split("T")[0];
 
     switch (status) {
       case "upcoming":
-        return bookings.filter(
+        return groupBookings(bookings.filter(
           (b) =>
             (b.status === "confirmed" || b.status === "pending") &&
             b.bookingDate >= today
-        );
+        ));
       case "past":
-        return bookings.filter(
+        return groupBookings(bookings.filter(
           (b) =>
             b.status === "completed" ||
             (b.bookingDate < today && b.status !== "cancelled")
-        );
+        ));
       case "cancelled":
-        return bookings.filter((b) => b.status === "cancelled");
+        return groupBookings(bookings.filter((b) => b.status === "cancelled"));
       default:
-        return bookings;
+        return groupBookings(bookings);
     }
   };
 
-  const BookingCard = ({ booking }: { booking: Booking }) => {
+  const BookingCard = ({ bookings: bookingGroup }: { bookings: Booking[] }) => {
+    const booking = bookingGroup[0];
     const [salonName, setSalonName] = useState("Loading...");
-    const [serviceName, setServiceName] = useState("Loading...");
+    const [salonCity, setSalonCity] = useState("");
+    const [serviceNames, setServiceNames] = useState<string[]>(["Loading..."]);
     const [staffName, setStaffName] = useState("Loading...");
     const [isRescheduleOpen, setIsRescheduleOpen] = useState(false);
     const [rescheduleData, setRescheduleData] = useState({
@@ -186,52 +209,105 @@ export default function MyBookingsPage() {
     useEffect(() => {
       const fetchDetails = async () => {
         try {
+          const salonId = booking.salonId?._id || booking.salonId?.id || booking.salonId;
+          
           const [salonRes, serviceRes, staffRes] = await Promise.all([
-            apiRequest(`/api/salons/${booking.salonId}`),
-            apiRequest(`/api/services?salon_id=${booking.salonId}`),
-            apiRequest(`/api/staff?salon_id=${booking.salonId}`),
+            apiRequest(`/api/salons/${salonId}`),
+            apiRequest(`/api/services?salon_id=${salonId}`),
+            apiRequest(`/api/staff?salon_id=${salonId}`),
           ]);
 
           if (salonRes.ok) {
             const salon = await salonRes.json();
-            setSalonName(salon.name);
+            setSalonName(salon.name || "Unknown Salon");
+            setSalonCity(salon.city || "");
+          } else {
+            console.error("Salon fetch failed:", await salonRes.text());
+            setSalonName("Error loading salon");
           }
 
           if (serviceRes.ok) {
             const services = await serviceRes.json();
-            const service = services.find((s: any) => s.id === booking.serviceId);
-            if (service) setServiceName(service.name);
+            const names = bookingGroup.map((b) => {
+              const serviceId = b.serviceId?._id || b.serviceId?.id || b.serviceId;
+              const service = services.find((s: any) => {
+                const sId = s._id || s.id;
+                return sId?.toString() === serviceId?.toString();
+              });
+              return service?.name || "Service not found";
+            });
+            setServiceNames(names);
+          } else {
+            setServiceNames(["Error loading services"]);
           }
 
           if (staffRes.ok) {
             const staffList = await staffRes.json();
-            const staff = staffList.find((s: any) => s.id === booking.staffId);
-            if (staff) setStaffName(staff.name);
+            const staffId = booking.staffId?._id || booking.staffId?.id || booking.staffId;
+            const staff = staffList.find((s: any) => {
+              const sId = s._id || s.id;
+              return sId?.toString() === staffId?.toString();
+            });
+            setStaffName(staff?.name || "Staff not found");
+          } else {
+            console.error("Staff fetch failed:", await staffRes.text());
+            setStaffName("Error loading staff");
           }
         } catch (error) {
-          console.error("Failed to fetch booking details:", error);
+          console.error("Failed to fetch booking details:", error, booking);
+          setSalonName("Error loading salon");
+          setServiceNames(["Error loading services"]);
+          setStaffName("Error loading staff");
         }
       };
 
       fetchDetails();
-    }, [booking]);
+    }, [bookingGroup]);
 
     const handleReschedule = async () => {
       try {
         setIsRescheduling(true);
-        const response = await apiRequest(`/api/bookings/${booking.id}/reschedule`, {
-          method: "POST",
-          body: JSON.stringify(rescheduleData),
-        });
-
-        if (response.ok) {
-          toast.success("Booking rescheduled successfully");
-          setIsRescheduleOpen(false);
-          fetchBookings();
-        } else {
-          const error = await response.json();
-          toast.error(error.error || "Failed to reschedule booking");
+        const salonId = booking.salonId?._id || booking.salonId?.id || booking.salonId;
+        const servicesRes = await apiRequest(`/api/services?salon_id=${salonId}`);
+        const services = servicesRes.ok ? await servicesRes.json() : [];
+        
+        for (const b of bookingGroup) {
+          const bookingId = b._id || b.id;
+          if (!bookingId) {
+            console.error("Invalid booking ID:", b);
+            toast.error("Invalid booking ID");
+            return;
+          }
+          
+          const serviceId = b.serviceId?._id || b.serviceId?.id || b.serviceId;
+          const service = services.find((s: any) => 
+            (s._id || s.id)?.toString() === serviceId?.toString()
+          );
+          const duration = service?.durationMinutes || 60;
+          const [hours, minutes] = rescheduleData.startTime.split(':').map(Number);
+          const endMinutes = hours * 60 + minutes + duration;
+          const endHours = Math.floor(endMinutes / 60);
+          const endMins = endMinutes % 60;
+          const endTime = `${String(endHours).padStart(2, '0')}:${String(endMins).padStart(2, '0')}`;
+          
+          const response = await apiRequest(`/api/bookings/${bookingId}`, {
+            method: "PUT",
+            body: JSON.stringify({
+              bookingDate: rescheduleData.bookingDate,
+              startTime: rescheduleData.startTime,
+              endTime: endTime,
+            }),
+          });
+          if (!response.ok) {
+            const errorText = await response.text();
+            console.error("Reschedule failed:", errorText);
+            toast.error("Failed to reschedule booking");
+            return;
+          }
         }
+        toast.success("Booking rescheduled successfully");
+        setIsRescheduleOpen(false);
+        fetchBookings();
       } catch (error) {
         console.error("Failed to reschedule booking:", error);
         toast.error("Failed to reschedule booking");
@@ -240,9 +316,14 @@ export default function MyBookingsPage() {
       }
     };
 
-    const isPast = new Date(booking.bookingDate) < new Date();
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const bookingDateObj = new Date(booking.bookingDate);
+    bookingDateObj.setHours(0, 0, 0, 0);
+    const isPast = bookingDateObj < today;
     const canCancel = booking.status === "pending" || booking.status === "confirmed";
     const canReschedule = canCancel && !isPast;
+    const canDelete = booking.status === "cancelled" || booking.status === "completed" || isPast;
 
     return (
       <Card>
@@ -250,7 +331,19 @@ export default function MyBookingsPage() {
           <div className="flex items-start justify-between">
             <div className="flex-1">
               <CardTitle className="text-lg mb-1">{salonName}</CardTitle>
-              <p className="text-sm text-muted-foreground">{serviceName}</p>
+              {salonCity && (
+                <div className="flex items-center gap-1 text-xs text-muted-foreground mb-1">
+                  <MapPin className="h-3 w-3" />
+                  <span>{salonCity}</span>
+                </div>
+              )}
+              {serviceNames.length > 0 && (
+                <div className="text-sm text-muted-foreground">
+                  {serviceNames.map((name, idx) => (
+                    <div key={idx}>• {name}</div>
+                  ))}
+                </div>
+              )}
             </div>
             {getStatusBadge(booking.status)}
           </div>
@@ -275,7 +368,7 @@ export default function MyBookingsPage() {
               </p>
             </div>
           )}
-          {(canReschedule || canCancel) && !isPast && (
+          {((canReschedule || canCancel) && !isPast) || canDelete ? (
             <div className="pt-2 border-t flex gap-2">
               {canReschedule && (
                 <Dialog open={isRescheduleOpen} onOpenChange={setIsRescheduleOpen}>
@@ -345,13 +438,17 @@ export default function MyBookingsPage() {
                     <AlertDialogHeader>
                       <AlertDialogTitle>Cancel Booking</AlertDialogTitle>
                       <AlertDialogDescription>
-                        Are you sure you want to cancel this booking? This action cannot be undone. Cancellations must be made at least 24 hours in advance.
+                        Are you sure you want to cancel this booking? This will cancel all services in this appointment. This action cannot be undone.
                       </AlertDialogDescription>
                     </AlertDialogHeader>
                     <AlertDialogFooter>
                       <AlertDialogCancel>Keep Booking</AlertDialogCancel>
                       <AlertDialogAction
-                        onClick={() => handleCancelBooking(booking.id)}
+                        onClick={async () => {
+                          for (const b of bookingGroup) {
+                            await handleCancelBooking(b.id);
+                          }
+                        }}
                         className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                       >
                         Cancel Booking
@@ -360,8 +457,40 @@ export default function MyBookingsPage() {
                   </AlertDialogContent>
                 </AlertDialog>
               )}
+              {canDelete && (
+                <AlertDialog>
+                  <AlertDialogTrigger asChild>
+                    <Button variant="outline" size="sm" className="flex-1">
+                      <Trash2 className="h-4 w-4 mr-2" />
+                      Delete
+                    </Button>
+                  </AlertDialogTrigger>
+                  <AlertDialogContent>
+                    <AlertDialogHeader>
+                      <AlertDialogTitle>Delete Booking</AlertDialogTitle>
+                      <AlertDialogDescription>
+                        Are you sure you want to delete this booking? This action cannot be undone.
+                      </AlertDialogDescription>
+                    </AlertDialogHeader>
+                    <AlertDialogFooter>
+                      <AlertDialogCancel>Cancel</AlertDialogCancel>
+                      <AlertDialogAction
+                        onClick={async () => {
+                          for (const b of bookingGroup) {
+                            const bookingId = b._id || b.id;
+                            if (bookingId) await handleDeleteBooking(bookingId);
+                          }
+                        }}
+                        className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                      >
+                        Delete
+                      </AlertDialogAction>
+                    </AlertDialogFooter>
+                  </AlertDialogContent>
+                </AlertDialog>
+              )}
             </div>
-          )}
+          ) : null}
         </CardContent>
       </Card>
     );
@@ -448,8 +577,8 @@ export default function MyBookingsPage() {
               </Card>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {upcomingBookings.map((booking) => (
-                  <BookingCard key={booking.id} booking={booking} />
+                {upcomingBookings.map((group, idx) => (
+                  <BookingCard key={idx} bookings={group} />
                 ))}
               </div>
             )}
@@ -468,8 +597,8 @@ export default function MyBookingsPage() {
               </Card>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {pastBookings.map((booking) => (
-                  <BookingCard key={booking.id} booking={booking} />
+                {pastBookings.map((group, idx) => (
+                  <BookingCard key={idx} bookings={group} />
                 ))}
               </div>
             )}
@@ -488,8 +617,8 @@ export default function MyBookingsPage() {
               </Card>
             ) : (
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-                {cancelledBookings.map((booking) => (
-                  <BookingCard key={booking.id} booking={booking} />
+                {cancelledBookings.map((group, idx) => (
+                  <BookingCard key={idx} bookings={group} />
                 ))}
               </div>
             )}

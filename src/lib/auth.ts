@@ -1,42 +1,21 @@
-import { betterAuth } from "better-auth";
-import { drizzleAdapter } from "better-auth/adapters/drizzle";
-import { bearer } from "better-auth/plugins";
 import { NextRequest } from 'next/server';
-import { headers } from "next/headers"
-import { db } from "@/db";
- 
-export const auth = betterAuth({
-	database: drizzleAdapter(db, {
-		provider: "sqlite",
-	}),
-	emailAndPassword: {    
-		enabled: true
-	},
-	plugins: [bearer()],
-	user: {
-		additionalFields: {
-			role: {
-				type: "string",
-				required: true,
-				defaultValue: "customer",
-				input: false
-			},
-			phone: {
-				type: "string",
-				required: false,
-				input: false
-			},
-			gender: {
-				type: "string",
-				required: false,
-				input: false
-			}
-		}
-	}
-});
+import { API_BASE_URL } from './api-config';
 
-// Session validation helper
 export async function getCurrentUser(request: NextRequest) {
-  const session = await auth.api.getSession({ headers: await headers() });
-  return session?.user || null;
+  try {
+    const token = request.cookies.get('bearer_token')?.value;
+    if (!token) return null;
+
+    const response = await fetch(`${API_BASE_URL}/api/auth/session`, {
+      headers: {
+        'Authorization': `Bearer ${token}`
+      }
+    });
+
+    if (!response.ok) return null;
+    const session = await response.json();
+    return session?.user || null;
+  } catch (error) {
+    return null;
+  }
 }

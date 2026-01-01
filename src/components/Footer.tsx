@@ -4,12 +4,12 @@ import { MapPin, Phone, Mail, Facebook, Twitter, Instagram, Linkedin } from "luc
 export const Footer = () => {
   return (
     <footer className="bg-muted/50 border-t mt-auto">
-      <div className="container mx-auto px-4 py-12">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8">
+      <div className="container mx-auto px-4 py-6 sm:py-8 md:py-12">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 sm:gap-8">
           {/* Company Info */}
-          <div className="space-y-4">
-            <h3 className="text-lg font-bold">SalonHub</h3>
-            <p className="text-sm text-muted-foreground">
+          <div className="space-y-3 sm:space-y-4">
+            <h3 className="text-base sm:text-lg font-bold">SalonHub</h3>
+            <p className="text-xs sm:text-sm text-muted-foreground">
               Your trusted platform for discovering and booking salon appointments with ease.
             </p>
             <div className="flex gap-3">
@@ -29,9 +29,9 @@ export const Footer = () => {
           </div>
 
           {/* Quick Links */}
-          <div className="space-y-4">
-            <h3 className="text-lg font-bold">Quick Links</h3>
-            <ul className="space-y-2 text-sm">
+          <div className="space-y-3 sm:space-y-4">
+            <h3 className="text-base sm:text-lg font-bold">Quick Links</h3>
+            <ul className="space-y-2 text-xs sm:text-sm">
               <li>
                 <Link href="/" className="text-muted-foreground hover:text-primary transition-colors">
                   Home
@@ -56,9 +56,9 @@ export const Footer = () => {
           </div>
 
           {/* For Business */}
-          <div className="space-y-4">
-            <h3 className="text-lg font-bold">For Business</h3>
-            <ul className="space-y-2 text-sm">
+          <div className="space-y-3 sm:space-y-4">
+            <h3 className="text-base sm:text-lg font-bold">For Business</h3>
+            <ul className="space-y-2 text-xs sm:text-sm">
               <li>
                 <Link href="/register" className="text-muted-foreground hover:text-primary transition-colors">
                   Register Your Salon
@@ -83,9 +83,9 @@ export const Footer = () => {
           </div>
 
           {/* Contact Info */}
-          <div className="space-y-4">
-            <h3 className="text-lg font-bold">Contact Us</h3>
-            <ul className="space-y-3 text-sm">
+          <div className="space-y-3 sm:space-y-4">
+            <h3 className="text-base sm:text-lg font-bold">Contact Us</h3>
+            <ul className="space-y-2 sm:space-y-3 text-xs sm:text-sm">
               <li className="flex items-start gap-2">
                 <MapPin className="h-4 w-4 text-primary mt-0.5 flex-shrink-0" />
                 <span className="text-muted-foreground">
@@ -109,17 +109,17 @@ export const Footer = () => {
         </div>
 
         {/* Bottom Bar */}
-        <div className="mt-8 pt-8 border-t text-center">
-          <div className="flex flex-col md:flex-row justify-between items-center gap-4 text-sm text-muted-foreground">
+        <div className="mt-6 sm:mt-8 pt-6 sm:pt-8 border-t text-center">
+          <div className="flex flex-col md:flex-row justify-between items-center gap-3 sm:gap-4 text-xs sm:text-sm text-muted-foreground">
             <p>© {new Date().getFullYear()} SalonHub. All rights reserved.</p>
-            <div className="flex gap-6">
-              <Link href="#" className="hover:text-primary transition-colors">
+            <div className="flex flex-wrap justify-center gap-4 sm:gap-6">
+              <Link href="/privacy-policy" className="hover:text-primary transition-colors">
                 Privacy Policy
               </Link>
-              <Link href="#" className="hover:text-primary transition-colors">
+              <Link href="/terms-of-service" className="hover:text-primary transition-colors">
                 Terms of Service
               </Link>
-              <Link href="#" className="hover:text-primary transition-colors">
+              <Link href="/cookie-policy" className="hover:text-primary transition-colors">
                 Cookie Policy
               </Link>
             </div>

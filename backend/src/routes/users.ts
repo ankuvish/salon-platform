@@ -1,134 +1,138 @@
 import { Router } from 'express';
-import { db } from '../db';
-import { user, account, salons } from '../db/schema';
-import { eq } from 'drizzle-orm';
-import { validateSession } from '../lib/auth';
+import { User, Booking } from '../db/schema';
 import bcrypt from 'bcrypt';
 
 const router = Router();
 
-// Get current user profile
-router.get('/me', async (req, res) => {
+router.get('/:id', async (req, res) => {
   try {
-    const currentUser = await validateSession(req);
-    if (!currentUser) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    // Get user's salon if they're an owner
-    let userSalon = null;
-    if (currentUser.role === 'owner') {
-      const salon = await db
-        .select()
-        .from(salons)
-        .where(eq(salons.ownerId, currentUser.id))
-        .limit(1);
-      
-      if (salon.length > 0) {
-        userSalon = salon[0];
-      }
-    }
-
-    res.json({
-      ...currentUser,
-      salon: userSalon,
-    });
+    const user = await User.findById(req.params.id).select('-password');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json(user);
   } catch (error) {
-    console.error('Error fetching user profile:', error);
-    res.status(500).json({ error: 'Failed to fetch user profile' });
+    res.status(500).json({ error: 'Failed to fetch user' });
   }
 });
 
-// Update user profile
-router.put('/me', async (req, res) => {
+router.put('/:id/update', async (req, res) => {
   try {
-    const currentUser = await validateSession(req);
-    if (!currentUser) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    const { name, phone, gender, image } = req.body;
-    const updates: any = {};
-
-    if (name !== undefined) updates.name = name;
-    if (phone !== undefined) updates.phone = phone;
-    if (gender !== undefined) updates.gender = gender;
-    if (image !== undefined) updates.image = image;
+    const { username, ...otherData } = req.body;
+    const updateData: any = { ...otherData };
     
-    updates.updatedAt = new Date();
-
-    await db.update(user).set(updates).where(eq(user.id, currentUser.id));
-
-    const updated = await db
-      .select()
-      .from(user)
-      .where(eq(user.id, currentUser.id))
-      .limit(1);
-
-    res.json(updated[0]);
+    if (username) {
+      const existing = await User.findOne({ username, _id: { $ne: req.params.id } });
+      if (existing) {
+        return res.status(400).json({ error: 'Username already taken' });
+      }
+      updateData.username = username;
+    }
+    
+    const user = await User.findByIdAndUpdate(req.params.id, updateData, { new: true }).select('-password');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    res.json(user);
   } catch (error) {
-    console.error('Error updating user profile:', error);
-    res.status(500).json({ error: 'Failed to update user profile' });
+    res.status(500).json({ error: 'Failed to update user' });
   }
 });
 
-// Set/update password
-router.post('/set-password', async (req, res) => {
+router.post('/:id/change-password', async (req, res) => {
   try {
-    const currentUser = await validateSession(req);
-    if (!currentUser) {
-      return res.status(401).json({ error: 'Unauthorized' });
+    const { currentPassword, newPassword } = req.body;
+    
+    const user = await User.findById(req.params.id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    
+    if (user.password) {
+      const isValid = await bcrypt.compare(currentPassword, user.password);
+      if (!isValid) return res.status(401).json({ error: 'Current password is incorrect' });
     }
-
-    const { password, currentPassword } = req.body;
-
-    if (!password) {
-      return res.status(400).json({ error: 'Password is required' });
-    }
-
-    // Check if user already has a password
-    const userAccount = await db
-      .select()
-      .from(account)
-      .where(eq(account.userId, currentUser.id))
-      .limit(1);
-
-    if (userAccount.length > 0 && userAccount[0].password) {
-      // Verify current password
-      if (!currentPassword) {
-        return res.status(400).json({ error: 'Current password is required' });
-      }
-
-      const isValid = await bcrypt.compare(currentPassword, userAccount[0].password);
-      if (!isValid) {
-        return res.status(400).json({ error: 'Current password is incorrect' });
-      }
-    }
-
-    // Hash new password
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    if (userAccount.length > 0) {
-      await db
-        .update(account)
-        .set({ password: hashedPassword, updatedAt: new Date() })
-        .where(eq(account.userId, currentUser.id));
-    } else {
-      await db.insert(account).values({
-        id: `${currentUser.id}-password`,
-        accountId: currentUser.id,
-        providerId: 'credential',
-        userId: currentUser.id,
-        password: hashedPassword,
-        createdAt: new Date(),
-        updatedAt: new Date(),
-      });
-    }
-
-    res.json({ success: true, message: 'Password updated successfully' });
+    
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    user.password = hashedPassword;
+    await user.save();
+    
+    res.json({ message: 'Password changed successfully' });
   } catch (error) {
-    console.error('Error setting password:', error);
-    res.status(500).json({ error: 'Failed to set password' });
+    res.status(500).json({ error: 'Failed to change password' });
+  }
+});
+
+router.post('/promote-admin', async (req, res) => {
+  try {
+    const { email, secretKey } = req.body;
+    
+    if (secretKey !== 'SUPER_ADMIN_SECRET_2024') {
+      return res.status(403).json({ error: 'Invalid secret key' });
+    }
+    
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    if (!user.roles.includes('admin')) {
+      user.roles.push('admin');
+      await user.save();
+    }
+    
+    res.json({ message: 'User promoted to admin', user: { ...user.toObject(), password: undefined } });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to promote user' });
+  }
+});
+
+router.post('/promote-moderator', async (req, res) => {
+  try {
+    const { email, secretKey, region } = req.body;
+    
+    if (secretKey !== 'MODERATOR_SECRET_2024') {
+      return res.status(403).json({ error: 'Invalid secret key' });
+    }
+    
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(404).json({ error: 'User not found' });
+    }
+    
+    if (!user.roles.includes('moderator')) {
+      user.roles.push('moderator');
+    }
+    if (region) user.region = region;
+    await user.save();
+    
+    res.json({ message: 'User promoted to moderator', user: { ...user.toObject(), password: undefined } });
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to promote user' });
+  }
+});
+
+router.get('/moderators', async (req, res) => {
+  try {
+    const moderators = await User.find({ roles: 'moderator' }).select('-password');
+    res.json(moderators);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch moderators' });
+  }
+});
+
+router.get('/:id/data', async (req, res) => {
+  try {
+    const user = await User.findById(req.params.id).select('-password');
+    if (!user) return res.status(404).json({ error: 'User not found' });
+    
+    const bookings = await Booking.find({ customerId: req.params.id })
+      .populate('salonId', 'name')
+      .populate('serviceId', 'name price')
+      .populate('staffId', 'name');
+    
+    const data = {
+      user: user.toObject(),
+      bookings: bookings.map(b => b.toObject())
+    };
+    
+    res.json(data);
+  } catch (error) {
+    res.status(500).json({ error: 'Failed to fetch user data' });
   }
 });
 

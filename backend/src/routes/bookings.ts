@@ -1,53 +1,24 @@
 import { Router } from 'express';
-import { db } from '../db';
-import { bookings, salons, services, staff } from '../db/schema';
-import { eq, and } from 'drizzle-orm';
-import { validateSession } from '../lib/auth';
+import { Booking, Notification } from '../db/schema';
+import { notificationService } from '../lib/notifications';
 
 const router = Router();
 
-// Get all bookings (filtered by user)
 router.get('/', async (req, res) => {
   try {
-    const currentUser = await validateSession(req);
-    if (!currentUser) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    const { customer_id, salon_id, status } = req.query;
-
-    let query = db
-      .select({
-        booking: bookings,
-        salon: salons,
-        service: services,
-        staffMember: staff,
-      })
-      .from(bookings)
-      .leftJoin(salons, eq(bookings.salonId, salons.id))
-      .leftJoin(services, eq(bookings.serviceId, services.id))
-      .leftJoin(staff, eq(bookings.staffId, staff.id));
-
-    const conditions: any[] = [];
-
-    // Customers can only see their bookings
-    if (currentUser.role === 'customer') {
-      conditions.push(eq(bookings.customerId, currentUser.id));
-    }
-    // Owners can see bookings for their salons
-    else if (currentUser.role === 'owner' && salon_id) {
-      conditions.push(eq(bookings.salonId, parseInt(salon_id as string)));
-    }
-
-    if (status) {
-      conditions.push(eq(bookings.status, status as string));
-    }
-
-    if (conditions.length > 0) {
-      query = query.where(and(...conditions)) as any;
-    }
-
-    const result = await query;
+    const { customerId, salonId, salon_id } = req.query;
+    const query: any = {};
+    if (customerId) query.customerId = customerId;
+    if (salonId || salon_id) query.salonId = salonId || salon_id;
+    
+    console.log('Fetching bookings with query:', query);
+    const result = await Booking.find(query)
+      .populate('customerId', 'name email phone')
+      .populate('salonId', 'name')
+      .populate('serviceId', 'name price durationMinutes')
+      .populate('staffId', 'name specialization')
+      .sort({ bookingDate: 1, startTime: 1 });
+    console.log(`Found ${result.length} bookings`);
     res.json(result);
   } catch (error) {
     console.error('Error fetching bookings:', error);
@@ -55,159 +26,148 @@ router.get('/', async (req, res) => {
   }
 });
 
-// Get single booking
 router.get('/:id', async (req, res) => {
   try {
-    const currentUser = await validateSession(req);
-    if (!currentUser) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    const { id } = req.params;
-
-    const result = await db
-      .select({
-        booking: bookings,
-        salon: salons,
-        service: services,
-        staffMember: staff,
-      })
-      .from(bookings)
-      .leftJoin(salons, eq(bookings.salonId, salons.id))
-      .leftJoin(services, eq(bookings.serviceId, services.id))
-      .leftJoin(staff, eq(bookings.staffId, staff.id))
-      .where(eq(bookings.id, parseInt(id)))
-      .limit(1);
-
-    if (result.length === 0) {
-      return res.status(404).json({ error: 'Booking not found' });
-    }
-
-    res.json(result[0]);
+    const result = await Booking.findById(req.params.id)
+      .populate('customerId')
+      .populate('salonId')
+      .populate('serviceId')
+      .populate('staffId');
+    if (!result) return res.status(404).json({ error: 'Booking not found' });
+    res.json(result);
   } catch (error) {
-    console.error('Error fetching booking:', error);
     res.status(500).json({ error: 'Failed to fetch booking' });
   }
 });
 
-// Create booking
 router.post('/', async (req, res) => {
   try {
-    const currentUser = await validateSession(req);
-    if (!currentUser) {
-      return res.status(401).json({ error: 'Unauthorized' });
+    console.log('Creating booking with data:', JSON.stringify(req.body, null, 2));
+    const booking = new Booking(req.body);
+    const saved = await booking.save();
+    console.log('Booking created successfully:', saved._id);
+    
+    // Populate booking details for notification
+    const populated = await Booking.findById(saved._id)
+      .populate('customerId', 'name email phone')
+      .populate({ path: 'salonId', populate: { path: 'ownerId', select: 'name email phone' } })
+      .populate('serviceId', 'name');
+    
+    if (populated) {
+      const notificationData = {
+        customerName: populated.customerId.name,
+        customerEmail: populated.customerId.email,
+        customerPhone: populated.customerId.phone,
+        salonName: populated.salonId.name,
+        serviceName: populated.serviceId.name,
+        bookingDate: populated.bookingDate,
+        startTime: populated.startTime,
+        endTime: populated.endTime,
+        bookingId: saved._id.toString()
+      };
+      
+      // Send notification to customer
+      await notificationService.sendBookingConfirmation(notificationData);
+      
+      // Send notification to salon owner
+      if (populated.salonId.ownerId) {
+        await notificationService.sendOwnerBookingNotification({
+          ...notificationData,
+          ownerEmail: populated.salonId.ownerId.email,
+          ownerPhone: populated.salonId.ownerId.phone
+        });
+        
+        // Create in-app notification
+        await Notification.create({
+          userId: populated.salonId.ownerId._id,
+          type: 'booking',
+          title: 'New Booking',
+          message: `${populated.customerId.name} booked ${populated.serviceId.name} for ${populated.bookingDate} at ${populated.startTime}`,
+          relatedUserId: populated.customerId._id,
+          relatedId: saved._id.toString()
+        });
+      }
     }
-
-    const {
-      salonId,
-      serviceId,
-      staffId,
-      bookingDate,
-      startTime,
-      endTime,
-      notes,
-      paymentMethod,
-      paymentStatus,
-    } = req.body;
-
-    const result = await db.insert(bookings).values({
-      customerId: currentUser.id,
-      salonId,
-      serviceId,
-      staffId,
-      bookingDate,
-      startTime,
-      endTime,
-      status: 'confirmed',
-      notes,
-      paymentMethod,
-      paymentStatus: paymentStatus || 'pending',
-      createdAt: new Date().toISOString(),
-    }).returning();
-
-    res.status(201).json(result[0]);
-  } catch (error) {
-    console.error('Error creating booking:', error);
-    res.status(500).json({ error: 'Failed to create booking' });
+    
+    res.status(201).json(saved);
+  } catch (error: any) {
+    console.error('Booking creation error:', error.message);
+    console.error('Error details:', error);
+    res.status(400).json({ 
+      error: 'Failed to create booking', 
+      details: error.message,
+      validation: error.errors 
+    });
   }
 });
 
-// Cancel booking
+router.put('/:id', async (req, res) => {
+  try {
+    const result = await Booking.findByIdAndUpdate(req.params.id, req.body, { new: true, runValidators: true });
+    if (!result) return res.status(404).json({ error: 'Booking not found' });
+    res.json(result);
+  } catch (error) {
+    console.error('Booking update error:', error);
+    res.status(500).json({ error: 'Failed to update booking', details: error.message });
+  }
+});
+
 router.post('/:id/cancel', async (req, res) => {
   try {
-    const currentUser = await validateSession(req);
-    if (!currentUser) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    const { id } = req.params;
-
-    const booking = await db
-      .select()
-      .from(bookings)
-      .where(eq(bookings.id, parseInt(id)))
-      .limit(1);
-
-    if (booking.length === 0) {
-      return res.status(404).json({ error: 'Booking not found' });
-    }
-
-    if (booking[0].customerId !== currentUser.id && currentUser.role !== 'owner') {
-      return res.status(403).json({ error: 'Not authorized' });
-    }
-
-    await db
-      .update(bookings)
-      .set({ status: 'cancelled' })
-      .where(eq(bookings.id, parseInt(id)));
-
-    res.json({ success: true, message: 'Booking cancelled successfully' });
+    const result = await Booking.findByIdAndUpdate(
+      req.params.id,
+      { status: 'cancelled' },
+      { new: true }
+    );
+    if (!result) return res.status(404).json({ error: 'Booking not found' });
+    res.json(result);
   } catch (error) {
-    console.error('Error cancelling booking:', error);
     res.status(500).json({ error: 'Failed to cancel booking' });
   }
 });
 
-// Reschedule booking
-router.post('/:id/reschedule', async (req, res) => {
+router.delete('/:id', async (req, res) => {
   try {
-    const currentUser = await validateSession(req);
-    if (!currentUser) {
-      return res.status(401).json({ error: 'Unauthorized' });
-    }
-
-    const { id } = req.params;
-    const { bookingDate, startTime, endTime } = req.body;
-
-    const booking = await db
-      .select()
-      .from(bookings)
-      .where(eq(bookings.id, parseInt(id)))
-      .limit(1);
-
-    if (booking.length === 0) {
-      return res.status(404).json({ error: 'Booking not found' });
-    }
-
-    if (booking[0].customerId !== currentUser.id) {
-      return res.status(403).json({ error: 'Not authorized' });
-    }
-
-    await db
-      .update(bookings)
-      .set({ bookingDate, startTime, endTime })
-      .where(eq(bookings.id, parseInt(id)));
-
-    const updated = await db
-      .select()
-      .from(bookings)
-      .where(eq(bookings.id, parseInt(id)))
-      .limit(1);
-
-    res.json(updated[0]);
+    const result = await Booking.findByIdAndDelete(req.params.id);
+    if (!result) return res.status(404).json({ error: 'Booking not found' });
+    res.json({ message: 'Booking deleted successfully' });
   } catch (error) {
-    console.error('Error rescheduling booking:', error);
-    res.status(500).json({ error: 'Failed to reschedule booking' });
+    console.error('Booking delete error:', error);
+    res.status(500).json({ error: 'Failed to delete booking' });
+  }
+});
+
+// Get unread booking count for salon owner
+router.get('/unread/count', async (req, res) => {
+  try {
+    const { salonId } = req.query;
+    if (!salonId) return res.status(400).json({ error: 'salonId required' });
+    
+    const count = await Booking.countDocuments({
+      salonId,
+      viewedByOwner: { $ne: true }
+    });
+    res.json({ count });
+  } catch (error) {
+    console.error('Error fetching unread count:', error);
+    res.status(500).json({ error: 'Failed to fetch unread count' });
+  }
+});
+
+// Mark bookings as viewed
+router.post('/mark-viewed', async (req, res) => {
+  try {
+    const { salonId } = req.body;
+    if (!salonId) return res.status(400).json({ error: 'salonId required' });
+    
+    await Booking.updateMany(
+      { salonId, viewedByOwner: { $ne: true } },
+      { $set: { viewedByOwner: true } }
+    );
+    res.json({ success: true });
+  } catch (error) {
+    console.error('Error marking bookings as viewed:', error);
+    res.status(500).json({ error: 'Failed to mark bookings as viewed' });
   }
 });
 

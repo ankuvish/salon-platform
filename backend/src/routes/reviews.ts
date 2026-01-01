@@ -1,68 +1,53 @@
 import { Router } from 'express';
-import { db } from '../db';
-import { reviews, salons } from '../db/schema';
-import { eq, sql } from 'drizzle-orm';
-import { validateSession } from '../lib/auth';
+import { Review, Salon } from '../db/schema';
 
 const router = Router();
 
-// Get reviews by salon ID
 router.get('/', async (req, res) => {
   try {
-    const { salon_id } = req.query;
-
-    if (!salon_id) {
-      return res.status(400).json({ error: 'salon_id is required' });
-    }
-
-    const result = await db
-      .select()
-      .from(reviews)
-      .where(eq(reviews.salonId, parseInt(salon_id as string)));
-
+    const { salonId } = req.query;
+    const query = salonId ? { salonId } : {};
+    const result = await Review.find(query).populate('customerId');
     res.json(result);
   } catch (error) {
-    console.error('Error fetching reviews:', error);
     res.status(500).json({ error: 'Failed to fetch reviews' });
   }
 });
 
-// Create review
 router.post('/', async (req, res) => {
   try {
-    const currentUser = await validateSession(req);
-    if (!currentUser) {
-      return res.status(401).json({ error: 'Unauthorized' });
+    const { salonId, customerId, rating, bookingId, comment } = req.body;
+    
+    // Check if user already reviewed this salon
+    const existingReview = await Review.findOne({ salonId, customerId });
+    
+    if (existingReview) {
+      // Update existing review
+      existingReview.rating = rating;
+      if (comment) existingReview.comment = comment;
+      if (bookingId) existingReview.bookingId = bookingId;
+      await existingReview.save();
+    } else {
+      // Create new review
+      const review = new Review({
+        salonId,
+        customerId,
+        rating,
+        comment: comment || undefined,
+        bookingId: bookingId || null
+      });
+      await review.save();
     }
 
-    const { salonId, bookingId, rating, comment } = req.body;
-
-    const result = await db.insert(reviews).values({
-      salonId,
-      customerId: currentUser.id,
-      bookingId,
-      rating,
-      comment,
-      createdAt: new Date().toISOString(),
-    }).returning();
-
-    // Update salon average rating
-    const allReviews = await db
-      .select()
-      .from(reviews)
-      .where(eq(reviews.salonId, salonId));
-
-    const avgRating = allReviews.reduce((acc, r) => acc + r.rating, 0) / allReviews.length;
-
-    await db
-      .update(salons)
-      .set({ rating: avgRating })
-      .where(eq(salons.id, salonId));
-
-    res.status(201).json(result[0]);
+    // Update salon's average rating
+    const allReviews = await Review.find({ salonId });
+    const avgRating = allReviews.reduce((sum, r) => sum + r.rating, 0) / allReviews.length;
+    await Salon.findByIdAndUpdate(salonId, { rating: avgRating });
+    
+    res.json({ success: true, rating: avgRating });
   } catch (error) {
     console.error('Error creating review:', error);
-    res.status(500).json({ error: 'Failed to create review' });
+    res.status(500).json({ error: 'Failed to create review', details: error.message });
   }
 });
 

@@ -1,5 +1,8 @@
 import { Request, Response, NextFunction } from 'express';
-import { auth } from '../lib/auth';
+import { User } from '../db/schema';
+
+const sessionStore = new Map<string, { userId: string; expiresAt: Date }>();
+export { sessionStore };
 
 export interface AuthRequest extends Request {
   user?: {
@@ -26,16 +29,24 @@ export async function authenticateToken(
       return res.status(401).json({ error: 'Authentication required' });
     }
 
-    // Verify token with better-auth
-    const session = await auth.api.getSession({
-      headers: new Headers({ authorization: `Bearer ${token}` })
-    });
-
-    if (!session || !session.user) {
+    const session = sessionStore.get(token);
+    if (!session || new Date() > session.expiresAt) {
+      sessionStore.delete(token);
       return res.status(401).json({ error: 'Invalid or expired token' });
     }
 
-    req.user = session.user as any;
+    const user = await User.findById(session.userId).select('-password');
+    if (!user) {
+      sessionStore.delete(token);
+      return res.status(401).json({ error: 'User not found' });
+    }
+
+    req.user = {
+      id: (user._id as any).toString(),
+      email: user.email,
+      name: user.name,
+      role: user.role
+    };
     next();
   } catch (error) {
     console.error('Authentication error:', error);

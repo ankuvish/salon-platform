@@ -3,7 +3,7 @@
 import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { MapPin, Star, Clock, Scissors, Users } from "lucide-react";
+import { MapPin, Clock, Scissors, Users } from "lucide-react";
 import Link from "next/link";
 import Image from "next/image";
 
@@ -23,14 +23,15 @@ interface Staff {
 
 interface SalonCardProps {
   salon: {
-    id: number;
+    _id?: string;
+    id?: number;
     name: string;
     description: string;
     address: string;
     city: string;
     phone: string;
     rating: number;
-    imageUrl: string | null;
+    imageUrl?: string | null;
     openingTime: string;
     closingTime: string;
     services?: Service[];
@@ -43,34 +44,12 @@ export default function SalonCard({ salon }: SalonCardProps) {
   const displayedStaff = salon.staff?.slice(0, 3) || [];
   const hasMoreServices = (salon.services?.length || 0) > 3;
   const hasMoreStaff = (salon.staff?.length || 0) > 3;
-
-  // Render star rating with proper fill colors
-  const renderStars = (rating: number) => {
-    const stars = [];
-    const fullStars = Math.floor(rating);
-    const hasHalfStar = rating % 1 >= 0.5;
-    
-    for (let i = 0; i < 5; i++) {
-      if (i < fullStars) {
-        stars.push(
-          <Star key={i} className="h-3 w-3 fill-yellow-400 text-yellow-400" />
-        );
-      } else if (i === fullStars && hasHalfStar) {
-        stars.push(
-          <Star key={i} className="h-3 w-3 fill-yellow-400/50 text-yellow-400" />
-        );
-      } else {
-        stars.push(
-          <Star key={i} className="h-3 w-3 text-gray-300" />
-        );
-      }
-    }
-    return stars;
-  };
+  const salonSlug = salon.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
+  const salonId = salon._id || salon.id;
 
   return (
-    <Card className="overflow-hidden hover:shadow-lg transition-shadow">
-      <div className="relative h-48 w-full bg-muted">
+    <Card className="overflow-hidden hover:shadow-2xl transition-all duration-300 luxury-card hover:scale-[1.02] md:hover:scale-105 hover:border-purple-300 dark:hover:border-purple-700">
+      <div className="relative h-48 sm:h-56 w-full bg-muted">
         {salon.imageUrl ? (
           <Image
             src={salon.imageUrl}
@@ -85,19 +64,16 @@ export default function SalonCard({ salon }: SalonCardProps) {
             <span className="text-4xl">💇</span>
           </div>
         )}
-        <Badge className="absolute top-2 right-2 bg-background/90 backdrop-blur-sm">
-          <div className="flex items-center gap-1">
-            {renderStars(salon.rating)}
-            <span className="ml-1 text-xs font-semibold">{salon.rating.toFixed(1)}</span>
-          </div>
+        <Badge className="absolute top-3 right-3 bg-background/90 backdrop-blur-sm text-sm font-semibold text-black dark:text-white">
+          ⭐ {salon.rating.toFixed(1)}
         </Badge>
       </div>
-      <CardContent className="p-4">
-        <h3 className="font-semibold text-lg mb-2 line-clamp-1">{salon.name}</h3>
-        <p className="text-sm text-muted-foreground mb-3 line-clamp-2">
+      <CardContent className="p-4 sm:p-5">
+        <h3 className="font-semibold text-base sm:text-lg mb-2 line-clamp-1">{salon.name}</h3>
+        <p className="text-xs sm:text-sm text-muted-foreground mb-3 line-clamp-2">
           {salon.description}
         </p>
-        <div className="space-y-2 text-sm mb-4">
+        <div className="space-y-2 text-xs sm:text-sm mb-4">
           <div className="flex items-center text-muted-foreground">
             <MapPin className="h-4 w-4 mr-2 flex-shrink-0" />
             <span className="line-clamp-1">{salon.address}, {salon.city}</span>
@@ -152,9 +128,9 @@ export default function SalonCard({ salon }: SalonCardProps) {
           </div>
         )}
       </CardContent>
-      <CardFooter className="p-4 pt-0">
-        <Button asChild className="w-full">
-          <Link href={`/salons/${salon.id}`}>View Details</Link>
+      <CardFooter className="p-4 sm:p-5 pt-0">
+        <Button asChild className="w-full luxury-button">
+          <Link href={`/salons/${salonSlug}-${salonId}`}>View Details</Link>
         </Button>
       </CardFooter>
     </Card>
