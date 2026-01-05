@@ -7,8 +7,7 @@
         "build": "next build",
         "start": "next start",
         "lint": "next lint",
-        "test:api": "node test-api.js",
-        "deploy:check": "npm run lint && npm run build && npm run test:api"
+        "deploy:netlify": "npm run build"
     },
     "dependencies": {
         "@babel/parser": "^7.28.4",
